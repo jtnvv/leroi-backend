@@ -4,3 +4,6 @@ sqlalchemy
 pydantic
 passlib[bcrypt]
 python-jose
+fastapi-mail
+python-dotenv
+redis
