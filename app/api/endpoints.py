@@ -10,16 +10,38 @@ from app.db.models import EmailVerificationRequest, UserRegistrationRequest, Use
 router = APIRouter()
 
 def get_db():
+    """
+    Proporciona una sesión de base de datos para cada solicitud.
+
+    Yields:
+        Session: Sesión de la base de datos.
+    """
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
- 
+
 @router.post("/send-verification")
 async def send_verification_email(request: EmailVerificationRequest, db: Session = Depends(get_db)):
+    """
+    Envía un correo electrónico de verificación al usuario.
+
+    Args:
+        request (EmailVerificationRequest): Datos del correo y código de verificación.
+        db (Session): Sesión de la base de datos.
+
+    Returns:
+        dict: Estado y mensaje de éxito.
+
+    Raises:
+        HTTPException: Si ocurre un error al enviar el correo.
+    """
     try:
+        # Guarda el código de verificación en la base de datos
         save_verification_code(db, request.email, request.code)
+        
+        # Configura el mensaje de correo electrónico
         message = MessageSchema(
             subject="Verificación de Correo - LEROI",
             recipients=[request.email],
@@ -37,6 +59,7 @@ async def send_verification_email(request: EmailVerificationRequest, db: Session
             subtype="html"
         )
         
+        # Envía el mensaje de correo electrónico
         await fastmail.send_message(message)
         
         return {
@@ -53,6 +76,19 @@ async def send_verification_email(request: EmailVerificationRequest, db: Session
 
 @router.post("/verify-code")
 async def verify_code_endpoint(request: EmailVerificationRequest, db: Session = Depends(get_db)):
+    """
+    Verifica el código de verificación proporcionado por el usuario.
+
+    Args:
+        request (EmailVerificationRequest): Datos del correo y código de verificación.
+        db (Session): Sesión de la base de datos.
+
+    Returns:
+        dict: Estado y mensaje de éxito si el código es correcto.
+
+    Raises:
+        HTTPException: Si el código es incorrecto o ha expirado.
+    """
     if verify_code(db, request.email, request.code):
         return {"status": "success", "message": "Código de verificación correcto"}
     else:
@@ -60,10 +96,23 @@ async def verify_code_endpoint(request: EmailVerificationRequest, db: Session = 
             status_code=400,
             detail="Código de verificación incorrecto o expirado"
         )
-        
+
 @router.post("/register")
 async def register_user(request: UserRegistrationRequest, db: Session = Depends(get_db)):
+    """
+    Registra un nuevo usuario en la base de datos.
+
+    Args:
+        request (UserRegistrationRequest): Datos del usuario a registrar.
+        db (Session): Sesión de la base de datos.
+
+    Returns:
+        dict: Estado y mensaje de éxito tras el registro.
+    """
+    # Hashea la contraseña si está presente
     hashed_password = get_password_hash(request.password) if request.password else None
+    
+    # Crea un nuevo objeto de usuario
     user = User(
         nombre=request.name, 
         apellido=request.last_name if request.last_name else '', 
@@ -71,7 +120,10 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
         contraseña=hashed_password,
         proveedor=request.provider 
     )
+    
+    # Añade el usuario a la base de datos
     db.add(user)
     db.commit()
     db.refresh(user)
+    
     return {"status": "success", "message": "Usuario registrado correctamente"}
