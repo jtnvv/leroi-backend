@@ -69,7 +69,7 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
         apellido=request.last_name if request.last_name else '', 
         correo=request.email, 
         contraseña=hashed_password,
-        proveedor=request.provider if request.provider else 'local'
+        proveedor=request.provider 
     )
     db.add(user)
     db.commit()
