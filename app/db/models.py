@@ -3,6 +3,9 @@ from .session import Base
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
+class EmailCheckRequest(BaseModel):
+    email: EmailStr
+
 class EmailVerificationRequest(BaseModel):
     email: EmailStr
     code: str
@@ -32,3 +35,15 @@ class VerificationCode(Base):
     email = Column(String, index=True, nullable=False)
     codigo = Column(String, nullable=False)
     expiracion = Column(DateTime, nullable=False)
+    
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: Optional[str] = None
+    name: Optional[str] = None
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+    
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
