@@ -13,7 +13,7 @@ def save_verification_code(db: Session, email: str, code: str):
         code (str): Código de verificación.
 
     """
-    expires_at = datetime.utcnow() + timedelta(minutes=5)  # Expira en 5 minutos
+    expires_at = datetime.utcnow() + timedelta(minutes=5)  
     verification_code = VerificationCode(email=email, codigo=code, expiracion=expires_at)
     db.add(verification_code)
     db.commit()
