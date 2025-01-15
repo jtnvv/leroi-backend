@@ -2,8 +2,8 @@ import os
 import mercadopago
 from mercadopago.config import RequestOptions
 
-MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
-sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
+##SMP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
+##sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
 
 
 def calculate_price(amount: int):
