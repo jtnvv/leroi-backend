@@ -7,15 +7,18 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.services.register import save_verification_code, verify_code, get_password_hash
 from app.db.models import (
-    EmailVerificationRequest, 
-    UserRegistrationRequest, 
-    User, 
-    LoginRequest, 
+    EmailVerificationRequest,
+    UserRegistrationRequest,
+    User,
+    LoginRequest,
     EmailCheckRequest,
     ForgotPasswordRequest,
-    ResetPasswordRequest
+    ResetPasswordRequest,
+    PriceRequest,
+    PaymentRequest,
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
+from app.services.pricing import calculate_price, initiate_payment
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
 
@@ -25,6 +28,7 @@ security = HTTPBearer()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
+
 
 def get_db():
     """
@@ -38,8 +42,9 @@ def get_db():
         yield db
     finally:
         db.close()
-        
+
 # REGISTER
+
 
 @router.post("/check-email")
 async def check_email(request: EmailCheckRequest, db: Session = Depends(get_db)):
@@ -55,6 +60,7 @@ async def check_email(request: EmailCheckRequest, db: Session = Depends(get_db))
     """
     user = db.query(User).filter_by(correo=request.email).first()
     return {"status": "success", "exists": user is not None}
+
 
 @router.post("/send-verification")
 async def send_verification_email(request: EmailVerificationRequest, db: Session = Depends(get_db)):
@@ -74,7 +80,7 @@ async def send_verification_email(request: EmailVerificationRequest, db: Session
     try:
         # Guarda el código de verificación en la base de datos
         save_verification_code(db, request.email, request.code)
-        
+
         # Configura el mensaje de correo electrónico
         message = MessageSchema(
             subject="Verificación de Correo - LEROI",
@@ -92,21 +98,22 @@ async def send_verification_email(request: EmailVerificationRequest, db: Session
             """,
             subtype="html"
         )
-        
+
         # Envía el mensaje de correo electrónico
         await fastmail.send_message(message)
-        
+
         return {
             "status": "success",
             "message": "Código de verificación enviado",
             "email": request.email
         }
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Error al enviar el email: {str(e)}"
         )
+
 
 @router.post("/verify-code")
 async def verify_code_endpoint(request: EmailVerificationRequest, db: Session = Depends(get_db)):
@@ -131,6 +138,7 @@ async def verify_code_endpoint(request: EmailVerificationRequest, db: Session = 
             detail="Código de verificación incorrecto o expirado"
         )
 
+
 @router.post("/register")
 async def register_user(request: UserRegistrationRequest, db: Session = Depends(get_db)):
     """
@@ -143,27 +151,29 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
     Returns:
         dict: Estado y mensaje de éxito tras el registro.
     """
-    
+
     # Hashea la contraseña si está presente
-    hashed_password = get_password_hash(request.password) if request.password else None
-    
+    hashed_password = get_password_hash(
+        request.password) if request.password else None
+
     # Crea un nuevo objeto de usuario
     user = User(
-        nombre=request.name, 
-        apellido=request.last_name if request.last_name else '', 
-        correo=request.email, 
+        nombre=request.name,
+        apellido=request.last_name if request.last_name else '',
+        correo=request.email,
         contraseña=hashed_password,
-        proveedor=request.provider 
+        proveedor=request.provider
     )
-    
+
     # Añade el usuario a la base de datos
     db.add(user)
     db.commit()
     db.refresh(user)
-    
+
     return {"status": "success", "message": "Usuario registrado correctamente"}
 
 # LOGIN
+
 
 @router.post("/login-google")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
@@ -173,19 +183,20 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(correo=request.email).first()
     if not user:
         user = User(
-            nombre=request.name, 
-            apellido='', 
-            correo=request.email, 
+            nombre=request.name,
+            apellido='',
+            correo=request.email,
             contraseña=None,
             proveedor="google"
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-        
+
     access_token = create_access_token(data={"sub": user.correo})
-        
+
     return {"status": "success", "access_token": access_token, "token_type": "bearer"}
+
 
 @router.post("/login")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
@@ -206,12 +217,14 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     if user.proveedor == "google":
-        raise HTTPException(status_code=401, detail="Ya has iniciado sesión con Google")
+        raise HTTPException(
+            status_code=401, detail="Ya has iniciado sesión con Google")
     if not verify_password(request.password, user.contraseña):
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
     access_token = create_access_token(data={"sub": user.correo})
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 @router.get("/validate-token")
 async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -232,8 +245,10 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(sec
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
-    
+
 # Endpoint para solicitar el restablecimiento de contraseña
+
+
 @router.post("/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """
@@ -253,14 +268,15 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     user = db.query(User).filter_by(correo=request.email).first()
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    
+
     try:
         # Genera un token de restablecimiento con una expiración de 1 hora
-        reset_token = create_access_token(data={"sub": user.correo}, expires_delta=timedelta(minutes=10))
-        
+        reset_token = create_access_token(
+            data={"sub": user.correo}, expires_delta=timedelta(minutes=10))
+
         # Crea el enlace de restablecimiento de contraseña
         reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
-        
+
         # Configura el mensaje de correo electrónico
         message = MessageSchema(
             subject="Restablecimiento de Contraseña - LEROI",
@@ -278,16 +294,16 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
             """,
             subtype="html"
         )
-        
+
         # Envía el mensaje de correo electrónico
         await fastmail.send_message(message)
-        
+
         return {
             "status": "success",
             "message": "Enlace de restablecimiento enviado",
             "email": request.email
         }
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -295,6 +311,8 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
         )
 
 # Endpoint para restablecer la contraseña usando el token
+
+
 @router.post("/reset-password")
 async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     """
@@ -316,19 +334,63 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
         email = payload.get("sub")
         if email is None:
             raise HTTPException(status_code=400, detail="Token inválido")
-        
+
         # Busca al usuario por correo electrónico
         user = db.query(User).filter_by(correo=email).first()
         if not user:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado")
+
         # Cambia la contraseña del usuario
         user.contraseña = get_password_hash(request.new_password)
         db.commit()
-        
+
         return {"status": "success", "message": "Contraseña cambiada correctamente"}
-    
+
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=400, detail="El token ha expirado")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=400, detail="Token inválido")
+
+
+@router.post("/price")
+async def price(request: PriceRequest):
+    """
+    Consultar el valor en dolares de los creditos
+
+    Args:
+        request (PriceRequest): Datos de los creditos que se desean comprar.
+
+    Returns:
+        dict: Estado y valor de los creditos en dolares
+
+    Raises:
+        HTTPException: Si la cantidad de creditos es menor o igual que 0.
+    """
+    try:
+        if request.amount <= 0:
+            raise HTTPException(
+                status_code=400, detail="La cantidad de créditos debe ser mayor a 0"
+            )
+        price = calculate_price(request.amount)
+        return {"status": "success", "costo": price}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/create-payment")
+async def create_payment(request: PaymentRequest):
+    """
+    Crear enlace de pago
+
+    Args:
+        request (PaymentRequest): Datos del pago enviados desde el frontend.
+
+    Returns:
+        dict: URL para redirigir al usuario.
+    """
+    try:
+        payment_url = await initiate_payment(request)
+        return {"payment_url": payment_url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
