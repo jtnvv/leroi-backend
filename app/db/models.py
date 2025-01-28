@@ -62,3 +62,9 @@ class PriceRequest(BaseModel):
 
 class PaymentRequest(BaseModel):
     amount: int
+
+class ProcessFileRequest(BaseModel):
+    fileName: str
+    fileType: str
+    fileSize: int
+    fileBase64: str

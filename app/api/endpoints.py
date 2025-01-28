@@ -1,5 +1,6 @@
 import jwt
 import os
+import base64
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
@@ -16,9 +17,11 @@ from app.db.models import (
     ResetPasswordRequest,
     PriceRequest,
     PaymentRequest,
+    ProcessFileRequest
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
+from app.services.ai import ask_ai, ask_gemini
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
 
@@ -394,3 +397,19 @@ async def create_payment(request: PaymentRequest):
         return {"payment_url": payment_url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# Roadmaps
+
+@router.post("/process-file")
+async def process_file(request: ProcessFileRequest):
+    """
+    Procesar un archivo y obtener las roadmaps
+    """
+    print("se va a llamar a la IA")
+    response = ask_gemini(f"Este es su nombre: {request.fileName} y este es el contenido: {request.fileBase64}")
+    print(response)
+    return {"status": "success", "message": "Archivo procesado correctamente"}
+
+
+
