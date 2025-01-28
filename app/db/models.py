@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime
 from .session import Base
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from datetime import datetime, timezone
 
 
 class EmailCheckRequest(BaseModel):
@@ -62,6 +63,14 @@ class PriceRequest(BaseModel):
 
 class PaymentRequest(BaseModel):
     amount: int
+
+class CorreosBloqueados(Base):
+    __tablename__ = "correos_bloqueados"
+
+    id = Column(Integer, primary_key=True, index=True)
+    correo = Column(String, unique=True, nullable=False)
+    fecha_bloqueo = Column(DateTime, default=datetime.now(timezone.utc))
+
 
 class ProcessFileRequest(BaseModel):
     fileName: str

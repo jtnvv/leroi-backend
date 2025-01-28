@@ -28,5 +28,3 @@ def ask_gemini(prompt: str):
                     json con unicamente los 3 temas principales y nada más."
     response = model.generate_content(full_prompt)
     return response.text
-
-

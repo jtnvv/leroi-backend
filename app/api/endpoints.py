@@ -1,7 +1,7 @@
 import jwt
 import os
 import base64
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter,Depends,UploadFile, File, HTTPException,Form
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
 from sqlalchemy.orm import Session
@@ -17,13 +17,18 @@ from app.db.models import (
     ResetPasswordRequest,
     PriceRequest,
     PaymentRequest,
+    CorreosBloqueados,
     ProcessFileRequest
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
-from app.services.ai import ask_ai, ask_gemini
+#from app.services.ai import ask_ai, ask_gemini
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
+import httpx
+import asyncio
+from typing import Dict
+from datetime import datetime, timezone
 
 router = APIRouter()
 security = HTTPBearer()
@@ -154,7 +159,14 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
     Returns:
         dict: Estado y mensaje de éxito tras el registro.
     """
-
+    #Impedir el registro por bloqueo
+    blocked_email = db.query(CorreosBloqueados).filter(CorreosBloqueados.correo == request.email).first()
+    if blocked_email:
+        raise HTTPException(status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
+    #Impedir el registro por bloqueo
+    blocked_email = db.query(CorreosBloqueados).filter(CorreosBloqueados.correo == request.email).first()
+    if blocked_email:
+        raise HTTPException(status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
     # Hashea la contraseña si está presente
     hashed_password = get_password_hash(
         request.password) if request.password else None
@@ -399,6 +411,94 @@ async def create_payment(request: PaymentRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+
+#Analisis De Malware 
+API_KEY = os.getenv("API_KEY")
+UPLOAD_URL = "https://www.virustotal.com/api/v3/files"
+HEADERS = {
+    "x-apikey": API_KEY
+}
+
+async def fetch_analysis(analysis_url: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(analysis_url, headers=HEADERS)
+        response.raise_for_status()  
+        return response.json()
+@router.post("/analyze/")
+async def analyze_file(
+    file: UploadFile = File(...), 
+    email: str = Form(...), 
+    db: Session = Depends(get_db)
+) -> Dict:
+    """
+    Analiza un archivo PDF en busca de virus y, si se encuentra alguno, elimina al usuario asociado y bloquea su correo.
+    """
+    if not API_KEY:
+        raise HTTPException(status_code=400, detail="API Key is missing")
+    
+    #if file.content_type != "application/pdf":
+     #  raise HTTPException(status_code=400, detail="Solo se permite subir archivos PDF")
+
+    try: 
+        file_content = await file.read()
+
+        async with httpx.AsyncClient() as client:
+            upload_response = await client.post(UPLOAD_URL, headers=HEADERS, files={"file": (file.filename, file_content)})
+
+        if upload_response.status_code == 200:
+            result = upload_response.json()
+            analysis_id = result["data"]["id"]
+            analysis_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
+
+            max_attempts = 30
+            interval = 5  
+
+            for attempt in range(max_attempts):
+                analysis_data = await fetch_analysis(analysis_url)
+
+                if analysis_data["data"]["attributes"]["status"] == "completed":
+                    stats = analysis_data["data"]["attributes"]["stats"]
+                    malicious = stats.get("malicious", 0)
+                    harmless = stats.get("harmless", 0)
+                    undetected = stats.get("undetected", 0)
+                    total = harmless + malicious + undetected
+
+                    has_virus = malicious > 0
+
+                    if has_virus:
+                        # Eliminar usuario y bloquear correo si tiene virus
+                        user = db.query(User).filter(User.correo == email).first()
+                        if user:
+                            db.delete(user)
+                            db.commit()
+
+                            blocked_email = CorreosBloqueados(correo=email, fecha_bloqueo=datetime.now(timezone.utc))
+                            db.add(blocked_email)
+                            db.commit()
+
+                        return {
+                            "filename": file.filename,
+                            "malicious_count": malicious,
+                            "total_engines": total,
+                            "has_virus": has_virus,
+                            "message": "Este archivo tiene virus. El usuario ha sido eliminado y no puede volver a registrarse."
+                        }
+                    else:
+                        return {
+                            "filename": file.filename,
+                            "malicious_count": malicious,
+                            "total_engines": total,
+                            "has_virus": has_virus,
+                            "message": "Este archivo es seguro"
+                        }
+                await asyncio.sleep(interval)
+            raise HTTPException(status_code=408, detail="El análisis no se completó en el tiempo esperado.")
+        else:
+            raise HTTPException(status_code=upload_response.status_code, detail=upload_response.json())
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 # Roadmaps
 
 @router.post("/process-file")
