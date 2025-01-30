@@ -411,5 +411,109 @@ async def process_file(request: ProcessFileRequest):
     print(response)
     return {"status": "success", "message": "Archivo procesado correctamente"}
 
+#View user profile
+@router.get("/user-profile")
+async def get_user_profile(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """
+    Devuelve los datos del perfil del usuario autenticado.
 
+    Args:
+        credentials (HTTPAuthorizationCredentials): Credenciales de autorización.
+        db (Session): Sesión de la base de datos.
 
+    Returns:
+        dict: Datos del usuario.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado"
+            )
+
+        # Preparar la respuesta con los datos del usuario
+        return {
+            "status": "success",
+            "data": {
+                "firstName": user.nombre,
+                "lastName": user.apellido,
+                "email": user.correo,
+                "credits": 120,  # Placeholder para los créditos del usuario
+                "roadmapsCreated": 5,
+                "birthDate": "1990-06-15",  # Placeholder para la fecha de nacimiento
+            },
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+@router.delete("/delete-user/{user_id}")
+async def delete_user(
+    user_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a user record from the database.
+
+    Args:
+        user_id (int): The ID of the user to delete.
+        credentials (HTTPAuthorizationCredentials): Credentials for authorization.
+        db (Session): Database session.
+
+    Returns:
+        dict: Status and message indicating success or failure.
+
+    Raises:
+        HTTPException: If the user is not found or if there's an authorization issue.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decode the token to get the user's email
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Invalid token")
+
+        # Check if the user making the request is an admin or the user themselves
+        # You can add additional logic here to check for admin privileges if needed
+        user = db.query(User).filter_by(correo=email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Find the user to delete
+        user_to_delete = db.query(User).filter_by(id=user_id).first()
+        if not user_to_delete:
+            raise HTTPException(status_code=404, detail="User to delete not found")
+
+        # Delete the user
+        db.delete(user_to_delete)
+        db.commit()
+
+        return {"status": "success", "message": "User deleted successfully"}
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
