@@ -68,3 +68,8 @@ class ProcessFileRequest(BaseModel):
     fileType: str
     fileSize: int
     fileBase64: str
+
+class UserUpdateRequest(BaseModel):
+    name: str
+    last_name: str
+    provider: Optional[str]

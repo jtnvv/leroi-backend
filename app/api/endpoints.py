@@ -17,11 +17,12 @@ from app.db.models import (
     ResetPasswordRequest,
     PriceRequest,
     PaymentRequest,
-    ProcessFileRequest
+    ProcessFileRequest, 
+    UserUpdateRequest
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
-from app.services.ai import ask_ai, ask_gemini
+from app.services.ai import  ask_gemini
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
 
@@ -452,9 +453,9 @@ async def get_user_profile(
                 "firstName": user.nombre,
                 "lastName": user.apellido,
                 "email": user.correo,
-                "credits": 120,  # Placeholder para los créditos del usuario
-                "roadmapsCreated": 5,
-                "birthDate": "1990-06-15",  # Placeholder para la fecha de nacimiento
+                "credits": 33,  #Placeholder créditos
+                "roadmapsCreated": 33, #Placeholder Roadmaps creados
+                "provider": user.proveedor,
             },
         }
 
@@ -463,57 +464,98 @@ async def get_user_profile(
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
 
-@router.delete("/delete-user/{user_id}")
+@router.delete("/delete-user/{email}")
 async def delete_user(
-    user_id: int,
+    email: str,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
     """
-    Delete a user record from the database.
-
-    Args:
-        user_id (int): The ID of the user to delete.
-        credentials (HTTPAuthorizationCredentials): Credentials for authorization.
-        db (Session): Database session.
-
-    Returns:
-        dict: Status and message indicating success or failure.
-
-    Raises:
-        HTTPException: If the user is not found or if there's an authorization issue.
+    Eliminar un usuario por correo electrónico.
     """
     token = credentials.credentials
 
     try:
-        # Decode the token to get the user's email
+        # Decodificar el token para obtener el email y el rol del usuario autenticado
         payload = decode_access_token(token)
-        email = payload.get("sub")
+        authenticated_email = payload.get("sub")
+        user_role = payload.get("role")
 
-        if not email:
+        if not authenticated_email:
             raise HTTPException(status_code=400, detail="Invalid token")
 
-        # Check if the user making the request is an admin or the user themselves
-        # You can add additional logic here to check for admin privileges if needed
-        user = db.query(User).filter_by(correo=email).first()
-        if not user:
+        # Verificar si el usuario autenticado es un administrador o el propio usuario
+        if user_role != "admin" and authenticated_email != email:
+            raise HTTPException(status_code=403, detail="Unauthorized action")
+
+        # Buscar el usuario en la base de datos
+        user_to_delete = db.query(User).filter_by(correo=email).first()
+        if not user_to_delete:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Find the user to delete
-        user_to_delete = db.query(User).filter_by(id=user_id).first()
-        if not user_to_delete:
-            raise HTTPException(status_code=404, detail="User to delete not found")
-
-        # Delete the user
+        # Eliminar usuario
+        print(f"Deleting user: {user_to_delete.correo}")  # Log para depuración
         db.delete(user_to_delete)
         db.commit()
 
-        return {"status": "success", "message": "User deleted successfully"}
+        return {
+            "status": "success",
+            "message": "User deleted successfully",
+            "deleted_user_email": email
+        }
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update-user")
+async def update_user(
+    request: UserUpdateRequest,  # El modelo con los datos a actualizar
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Decodificar el token para obtener el correo del usuario autenticado
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        authenticated_email = payload.get("sub")
+
+        if not authenticated_email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario en la base de datos por correo
+        user = db.query(User).filter_by(correo=authenticated_email).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Actualizar los campos del usuario con la información del request
+        if request.name:
+            user.nombre = request.name
+        if request.last_name:
+            user.apellido = request.last_name
+        if request.email:
+            user.correo = request.email
+        if request.provider:
+            user.proveedor = request.provider
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Datos de usuario actualizados correctamente",
+            "data": {
+                "name": user.name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "provider": user.provider,
+            },
+        }
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
