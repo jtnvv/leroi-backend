@@ -22,13 +22,13 @@ from app.db.models import (
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
-#from app.services.ai import ask_ai, ask_gemini
+from app.services.ai import ask_ai, ask_gemini
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
 import httpx
 import asyncio
 from typing import Dict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter()
 security = HTTPBearer()
@@ -212,30 +212,43 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
 
     return {"status": "success", "access_token": access_token, "token_type": "bearer"}
 
+#Login normal
 
+MAX_ATTEMPTS = 5  
+BLOCK_TIME = timedelta(minutes=15)  
 @router.post("/login")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
-    """
-    Autentica al usuario y devuelve un token de acceso.
-
-    Args:
-        request (LoginRequest): Datos de inicio de sesión del usuario.
-        db (Session): Sesión de la base de datos.
-
-    Returns:
-        dict: Token de acceso y tipo de token.
-
-    Raises:
-        HTTPException: Si las credenciales son incorrectas.
-    """
     user = db.query(User).filter_by(correo=request.email).first()
+
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     if user.proveedor == "google":
-        raise HTTPException(
-            status_code=401, detail="Ya has iniciado sesión con Google")
+        raise HTTPException(status_code=401, detail="Ya has iniciado sesión con Google")
+    
+    blocked_user = db.query(CorreosBloqueados).filter_by(correos_login=request.email).first()
+
+    if blocked_user:
+        if blocked_user.bloqueado_hasta and blocked_user.bloqueado_hasta.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            
+            raise HTTPException(status_code=403, detail="Tu cuenta está bloqueada temporalmente. Intenta más tarde.")
+
     if not verify_password(request.password, user.contraseña):
+        
+        if not blocked_user:
+            blocked_user = CorreosBloqueados(correos_login=request.email, correo=request.email, intentos_fallidos=1)
+            db.add(blocked_user)
+        else:
+            blocked_user.intentos_fallidos += 1
+        
+        if blocked_user.intentos_fallidos >= MAX_ATTEMPTS:
+            blocked_user.bloqueado_hasta = datetime.now(timezone.utc) + BLOCK_TIME
+            db.commit()  
+            raise HTTPException(status_code=403, detail="Tu cuenta ha sido bloqueada temporalmente debido a intentos fallidos.")
+        db.commit()  
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    if blocked_user:
+        db.delete(blocked_user)
+        db.commit()
 
     access_token = create_access_token(data={"sub": user.correo})
     return {"access_token": access_token, "token_type": "bearer"}

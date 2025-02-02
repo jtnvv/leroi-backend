@@ -23,8 +23,10 @@ def ask_ai(prompt: str):
     return chat_completion.choices[0].message.content
 
 def ask_gemini(prompt: str):
-    full_prompt = f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de aprendizaje de un archivo. 
-                    El archivo es el siguiente: {prompt}. Quiero que el formato de la respuesta sea un 
-                    json con unicamente los 3 temas principales y nada más."
+    full_prompt = f"Eres un experto en la extracción de los 3 temas principales de los cuales " \
+              f"se pueden generar una ruta de aprendizaje de un archivo. " \
+              f"El archivo es el siguiente: {prompt}. Quiero que el formato de la respuesta sea un " \
+              f"json con únicamente los 3 temas principales y nada más."
+
     response = model.generate_content(full_prompt)
     return response.text

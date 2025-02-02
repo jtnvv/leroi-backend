@@ -70,6 +70,9 @@ class CorreosBloqueados(Base):
     id = Column(Integer, primary_key=True, index=True)
     correo = Column(String, unique=True, nullable=False)
     fecha_bloqueo = Column(DateTime, default=datetime.now(timezone.utc))
+    intentos_fallidos = Column(Integer, default=0)  # Contador de intentos fallidos
+    bloqueado_hasta = Column(DateTime, nullable=True)  
+    correos_login = Column(String, nullable=True)
 
 
 class ProcessFileRequest(BaseModel):
