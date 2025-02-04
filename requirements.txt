@@ -10,5 +10,4 @@ PyJWT
 mercadopago
 gunicorn
 psycopg2-binary
-#google-generativeai
-groq
+google-generativeai
