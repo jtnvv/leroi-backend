@@ -68,3 +68,6 @@ class ProcessFileRequest(BaseModel):
     fileType: str
     fileSize: int
     fileBase64: str
+    
+class TopicRequest(BaseModel):
+    topic: str
