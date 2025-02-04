@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from app.db.models import VerificationCode
 import hashlib
@@ -13,7 +13,7 @@ def save_verification_code(db: Session, email: str, code: str):
         code (str): Código de verificación.
 
     """
-    expires_at = datetime.utcnow() + timedelta(minutes=5)  
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
     verification_code = VerificationCode(email=email, codigo=code, expiracion=expires_at)
     db.add(verification_code)
     db.commit()
