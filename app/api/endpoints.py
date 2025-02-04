@@ -16,12 +16,13 @@ from app.db.models import (
     ResetPasswordRequest,
     PriceRequest,
     PaymentRequest,
-    ProcessFileRequest,
+    ProcessFileRequest, 
+    UserUpdateRequest,
     TopicRequest
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
-from app.services.ai import ask_gemini
+from app.services.ai import  ask_gemini
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
 
@@ -398,6 +399,154 @@ async def create_payment(request: PaymentRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+#View user profile
+@router.get("/user-profile")
+async def get_user_profile(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """
+    Devuelve los datos del perfil del usuario autenticado.
+
+    Args:
+        credentials (HTTPAuthorizationCredentials): Credenciales de autorización.
+        db (Session): Sesión de la base de datos.
+
+    Returns:
+        dict: Datos del usuario.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado"
+            )
+
+        # Preparar la respuesta con los datos del usuario
+        return {
+            "status": "success",
+            "data": {
+                "firstName": user.nombre,
+                "lastName": user.apellido,
+                "email": user.correo,
+                "credits": 33,  #Placeholder créditos
+                "roadmapsCreated": 33, #Placeholder Roadmaps creados
+                "provider": user.proveedor,
+            },
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+@router.delete("/delete-user/{email}")
+async def delete_user(
+    email: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Eliminar un usuario por correo electrónico.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decodificar el token para obtener el email y el rol del usuario autenticado
+        payload = decode_access_token(token)
+        authenticated_email = payload.get("sub")
+        user_role = payload.get("role")
+
+        if not authenticated_email:
+            raise HTTPException(status_code=400, detail="Invalid token")
+
+        # Verificar si el usuario autenticado es un administrador o el propio usuario
+        if user_role != "admin" and authenticated_email != email:
+            raise HTTPException(status_code=403, detail="Unauthorized action")
+
+        # Buscar el usuario en la base de datos
+        user_to_delete = db.query(User).filter_by(correo=email).first()
+        if not user_to_delete:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Eliminar usuario
+        print(f"Deleting user: {user_to_delete.correo}")  # Log para depuración
+        db.delete(user_to_delete)
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "User deleted successfully",
+            "deleted_user_email": email
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update-user")
+async def update_user(
+    request: UserUpdateRequest,  # El modelo con los datos a actualizar
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Decodificar el token para obtener el correo del usuario autenticado
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        authenticated_email = payload.get("sub")
+
+        if not authenticated_email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario en la base de datos por correo
+        user = db.query(User).filter_by(correo=authenticated_email).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Actualizar los campos del usuario con la información del request
+        if request.name:
+            user.nombre = request.name
+        if request.last_name:
+            user.apellido = request.last_name
+        if request.email:
+            user.correo = request.email
+        if request.provider:
+            user.proveedor = request.provider
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Datos de usuario actualizados correctamente",
+            "data": {
+                "name": user.name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "provider": user.provider,
+            },
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Roadmaps
 
