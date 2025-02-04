@@ -1,6 +1,6 @@
 import jwt
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
 from sqlalchemy.orm import Session
@@ -18,9 +18,10 @@ from app.db.models import (
     PaymentRequest,
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
-from app.services.pricing import calculate_price, initiate_payment
+from app.services.pricing import calculate_price
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
+import mercadopago
 
 router = APIRouter()
 security = HTTPBearer()
@@ -28,6 +29,11 @@ security = HTTPBearer()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
+MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
+
+TEST_PORT = os.getenv("TEST_PORT")
+
+sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
 
 
 def get_db():
@@ -381,7 +387,7 @@ async def price(request: PriceRequest):
 @router.post("/create-payment")
 async def create_payment(request: PaymentRequest):
     """
-    Crear enlace de pago
+    Inicia un pago usando la API de MercadoPago.
 
     Args:
         request (PaymentRequest): Datos del pago enviados desde el frontend.
@@ -390,7 +396,97 @@ async def create_payment(request: PaymentRequest):
         dict: URL para redirigir al usuario.
     """
     try:
-        payment_url = await initiate_payment(request)
+        u_price = calculate_price(request.amount)
+        # Datos del pago
+
+        preference_data = {
+            "items": [
+                {
+                    "id": 1,
+                    "title": f"Compra de {request.amount} creditos - Leroi",
+                    "quantity": 1,
+                    "unit_price": u_price,
+                    "currency_id": "USD",
+                }
+            ],
+            "back_urls": {
+                # "success": "localhost:5173/homepage",
+                # "failure": "localhost:5173/order-failed",
+                # "pending": "localhost:5173/pending"
+                "success": "localhost:5173",
+                "failure": "localhost:5173",
+                "pending": "localhost:5173"
+            },
+            # "auto_return": "approved",
+            "notification_url": TEST_PORT + "/mercadopago/paymentNotification"
+        }
+        # Crear el pago
+        preference_response = sdk.preference().create(preference_data)
+        preference = preference_response["response"]
+        # Retornar la URL de aprobación para redirigir al usuario
+        payment_url = preference.get("init_point")
         return {"payment_url": payment_url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/mercadopago/paymentNotification")
+async def payment_listener(request: Request):
+    """
+    Endpoint para recibir notificaciones de pago de MercadoPago.
+
+    Args:
+        request (PaymentRequest): Datos enviados desde MercadoPago.
+
+    Returns:
+        status: 200 (En caso de que todo esté bien)
+        status: diferente de 200 (En caso de que exista algún error)
+
+    """
+    try:
+        # Obtenemos el cuerpo de la solicitud
+        body = await request.json()
+        # print("Notificación recibida:", body)
+
+        # Verificamos si la notificación es de pago o de merchant_order
+        # 'topic' en algunas, 'type' en otras
+        topic = body.get("topic") or body.get("type")
+        resource = body.get("resource")
+
+        # Si es de tipo 'merchant_order', ignoramos.
+        if topic == "merchant_order":
+            # print(f"Notificación de 'merchant_order': {resource}")
+            # Respondemos con 200 OK para evitar reintentos
+            return {"status": "received"}
+
+        # Si es de tipo 'payment', obtenemos el ID
+        payment_id = None
+        if topic == "payment":
+            payment_id = body.get("data", {}).get("id")
+        elif "id" in body:  # Compatibilidad con otros formatos
+            payment_id = body["id"]
+
+        if not payment_id:
+            # print("Error: ID de pago no encontrado en la notificación.")
+            return {"status": "error", "message": "ID de pago no encontrado"}, 400
+
+        # Intentamos obtener los detalles del pago
+        payment = sdk.payment().get(payment_id).get("response")
+
+        if not payment:
+            print(f"Error: No se pudo obtener información del pago {
+                  payment_id}")
+            return {"status": "error", "message": "Pago no encontrado"}, 400
+
+        # Verificamos si el pago fue aprobado
+        if payment.get("status") == "approved":
+            print(f"Pago aprobado: ID={payment_id}")
+
+            # Lógica para procesamiento de pago
+
+        return {"status": "success", "message": "Notificación procesada correctamente"}
+
+    except Exception as e:
+        print(f"Error procesando el webhook: {str(e)}")
+        # Asegurar respuesta en todos los casos
+        return {"status": "error", "message": str(e)}, 500
