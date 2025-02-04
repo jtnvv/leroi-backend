@@ -1,6 +1,5 @@
 import jwt
 import os
-import base64
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
@@ -18,7 +17,8 @@ from app.db.models import (
     PriceRequest,
     PaymentRequest,
     ProcessFileRequest, 
-    UserUpdateRequest
+    UserUpdateRequest,
+    TopicRequest
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
@@ -400,18 +400,6 @@ async def create_payment(request: PaymentRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# Roadmaps
-
-@router.post("/process-file")
-async def process_file(request: ProcessFileRequest):
-    """
-    Procesar un archivo y obtener las roadmaps
-    """
-    print("se va a llamar a la IA")
-    response = ask_gemini(f"Este es su nombre: {request.fileName} y este es el contenido: {request.fileBase64}")
-    print(response)
-    return {"status": "success", "message": "Archivo procesado correctamente"}
-
 #View user profile
 @router.get("/user-profile")
 async def get_user_profile(
@@ -559,3 +547,38 @@ async def update_user(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+# Roadmaps
+
+@router.post("/process-file")
+async def process_file(request: ProcessFileRequest):
+    """
+    Procesar un archivo y obtener las roadmaps
+    """
+    print("Se van a generar los 3 temas")
+    full_prompt = (
+        f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
+        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
+        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    )
+    response = ask_gemini(full_prompt)
+    print(response, "tipo:" ,type(response))
+    return response
+
+@router.post("/generate-roadmap")
+async def generate_roadmap(request: TopicRequest):
+    """
+    Generar una roadmap a partir de los temas
+    """
+    print("Se va a generar la ruta de aprendizaje")
+    full_prompt = (
+        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
+        f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
+        f"cada uno con su propia lista de subtemas adicionales. "
+        f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
+        f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
+    )
+    response = ask_gemini(full_prompt)
+    parse_resposne = response.replace("json", "").replace("```", "")
+    print("parseado:", parse_resposne)
+    return parse_resposne
