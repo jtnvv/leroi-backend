@@ -632,7 +632,7 @@ async def update_user(
             raise HTTPException(status_code=400, detail="Token inválido")
 
         # Buscar al usuario en la base de datos por correo
-        user = db.query(User).filter_by(correo=authenticated_email).first()
+        user = db.query(User).filter(User.correo == authenticated_email).first()
 
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -653,10 +653,10 @@ async def update_user(
             "status": "success",
             "message": "Datos de usuario actualizados correctamente",
             "data": {
-                "name": user.name,
-                "last_name": user.last_name,
-                "email": user.email,
-                "provider": user.provider,
+                "name": user.nombre,  
+                "last_name": user.apellido,  
+                "email": user.correo, 
+                "provider": user.proveedor,  
             },
         }
 
