@@ -1,6 +1,7 @@
 import jwt
 import os
-from fastapi import APIRouter, Depends, HTTPException
+import base64
+from fastapi import APIRouter,Depends,UploadFile, File, HTTPException,Form
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
 from sqlalchemy.orm import Session
@@ -16,14 +17,20 @@ from app.db.models import (
     ResetPasswordRequest,
     PriceRequest,
     PaymentRequest,
-    ProcessFileRequest,
+    CorreosBloqueados,
+    ProcessFileRequest, 
+    UserUpdateRequest,
     TopicRequest
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
-from app.services.ai import ask_gemini
+from app.services.ai import  ask_gemini
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
+import httpx
+import asyncio
+from typing import Dict
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter()
 security = HTTPBearer()
@@ -154,7 +161,14 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
     Returns:
         dict: Estado y mensaje de éxito tras el registro.
     """
-
+    #Impedir el registro por bloqueo
+    blocked_email = db.query(CorreosBloqueados).filter(CorreosBloqueados.correo == request.email).first()
+    if blocked_email:
+        raise HTTPException(status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
+    #Impedir el registro por bloqueo
+    blocked_email = db.query(CorreosBloqueados).filter(CorreosBloqueados.correo == request.email).first()
+    if blocked_email:
+        raise HTTPException(status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
     # Hashea la contraseña si está presente
     hashed_password = get_password_hash(
         request.password) if request.password else None
@@ -200,30 +214,43 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
 
     return {"status": "success", "access_token": access_token, "token_type": "bearer"}
 
+#Login normal
 
+MAX_ATTEMPTS = 5  
+BLOCK_TIME = timedelta(minutes=15)  
 @router.post("/login")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
-    """
-    Autentica al usuario y devuelve un token de acceso.
-
-    Args:
-        request (LoginRequest): Datos de inicio de sesión del usuario.
-        db (Session): Sesión de la base de datos.
-
-    Returns:
-        dict: Token de acceso y tipo de token.
-
-    Raises:
-        HTTPException: Si las credenciales son incorrectas.
-    """
     user = db.query(User).filter_by(correo=request.email).first()
+
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     if user.proveedor == "google":
-        raise HTTPException(
-            status_code=401, detail="Ya has iniciado sesión con Google")
+        raise HTTPException(status_code=401, detail="Ya has iniciado sesión con Google")
+    
+    blocked_user = db.query(CorreosBloqueados).filter_by(correos_login=request.email).first()
+
+    if blocked_user:
+        if blocked_user.bloqueado_hasta and blocked_user.bloqueado_hasta.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            
+            raise HTTPException(status_code=403, detail="Tu cuenta está bloqueada temporalmente. Intenta más tarde.")
+
     if not verify_password(request.password, user.contraseña):
+        
+        if not blocked_user:
+            blocked_user = CorreosBloqueados(correos_login=request.email, correo=request.email, intentos_fallidos=1)
+            db.add(blocked_user)
+        else:
+            blocked_user.intentos_fallidos += 1
+        
+        if blocked_user.intentos_fallidos >= MAX_ATTEMPTS:
+            blocked_user.bloqueado_hasta = datetime.now(timezone.utc) + BLOCK_TIME
+            db.commit()  
+            raise HTTPException(status_code=403, detail="Tu cuenta ha sido bloqueada temporalmente debido a intentos fallidos.")
+        db.commit()  
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    if blocked_user:
+        db.delete(blocked_user)
+        db.commit()
 
     access_token = create_access_token(data={"sub": user.correo})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -398,6 +425,244 @@ async def create_payment(request: PaymentRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+
+
+#Analisis De Malware 
+API_KEY = os.getenv("API_KEY")
+UPLOAD_URL = "https://www.virustotal.com/api/v3/files"
+HEADERS = {
+    "x-apikey": API_KEY
+}
+
+async def fetch_analysis(analysis_url: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(analysis_url, headers=HEADERS)
+        response.raise_for_status()  
+        return response.json()
+@router.post("/analyze/")
+async def analyze_file(
+    file: UploadFile = File(...), 
+    email: str = Form(...), 
+    db: Session = Depends(get_db)
+) -> Dict:
+    """
+    Analiza un archivo PDF en busca de virus y, si se encuentra alguno, elimina al usuario asociado y bloquea su correo.
+    """
+    if not API_KEY:
+        raise HTTPException(status_code=400, detail="API Key is missing")
+    
+    #if file.content_type != "application/pdf":
+     #  raise HTTPException(status_code=400, detail="Solo se permite subir archivos PDF")
+
+    try: 
+        file_content = await file.read()
+
+        async with httpx.AsyncClient() as client:
+            upload_response = await client.post(UPLOAD_URL, headers=HEADERS, files={"file": (file.filename, file_content)})
+
+        if upload_response.status_code == 200:
+            result = upload_response.json()
+            analysis_id = result["data"]["id"]
+            analysis_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
+
+            max_attempts = 30
+            interval = 5  
+
+            for attempt in range(max_attempts):
+                analysis_data = await fetch_analysis(analysis_url)
+
+                if analysis_data["data"]["attributes"]["status"] == "completed":
+                    stats = analysis_data["data"]["attributes"]["stats"]
+                    malicious = stats.get("malicious", 0)
+                    harmless = stats.get("harmless", 0)
+                    undetected = stats.get("undetected", 0)
+                    total = harmless + malicious + undetected
+
+                    has_virus = malicious > 0
+
+                    if has_virus:
+                        # Eliminar usuario y bloquear correo si tiene virus
+                        user = db.query(User).filter(User.correo == email).first()
+                        if user:
+                            db.delete(user)
+                            db.commit()
+
+                            blocked_email = CorreosBloqueados(correo=email, fecha_bloqueo=datetime.now(timezone.utc))
+                            db.add(blocked_email)
+                            db.commit()
+
+                        return {
+                            "filename": file.filename,
+                            "malicious_count": malicious,
+                            "total_engines": total,
+                            "has_virus": has_virus,
+                            "message": "Este archivo tiene virus. El usuario ha sido eliminado y no puede volver a registrarse."
+                        }
+                    else:
+                        return {
+                            "filename": file.filename,
+                            "malicious_count": malicious,
+                            "total_engines": total,
+                            "has_virus": has_virus,
+                            "message": "Este archivo es seguro"
+                        }
+                await asyncio.sleep(interval)
+            raise HTTPException(status_code=408, detail="El análisis no se completó en el tiempo esperado.")
+        else:
+            raise HTTPException(status_code=upload_response.status_code, detail=upload_response.json())
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+#View user profile
+@router.get("/user-profile")
+async def get_user_profile(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """
+    Devuelve los datos del perfil del usuario autenticado.
+
+    Args:
+        credentials (HTTPAuthorizationCredentials): Credenciales de autorización.
+        db (Session): Sesión de la base de datos.
+
+    Returns:
+        dict: Datos del usuario.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado"
+            )
+
+        # Preparar la respuesta con los datos del usuario
+        return {
+            "status": "success",
+            "data": {
+                "firstName": user.nombre,
+                "lastName": user.apellido,
+                "email": user.correo,
+                "credits": 33,  #Placeholder créditos
+                "roadmapsCreated": 33, #Placeholder Roadmaps creados
+                "provider": user.proveedor,
+            },
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+@router.delete("/delete-user/{email}")
+async def delete_user(
+    email: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Eliminar un usuario por correo electrónico.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decodificar el token para obtener el email y el rol del usuario autenticado
+        payload = decode_access_token(token)
+        authenticated_email = payload.get("sub")
+        user_role = payload.get("role")
+
+        if not authenticated_email:
+            raise HTTPException(status_code=400, detail="Invalid token")
+
+        # Verificar si el usuario autenticado es un administrador o el propio usuario
+        if user_role != "admin" and authenticated_email != email:
+            raise HTTPException(status_code=403, detail="Unauthorized action")
+
+        # Buscar el usuario en la base de datos
+        user_to_delete = db.query(User).filter_by(correo=email).first()
+        if not user_to_delete:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Eliminar usuario
+        print(f"Deleting user: {user_to_delete.correo}")  # Log para depuración
+        db.delete(user_to_delete)
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "User deleted successfully",
+            "deleted_user_email": email
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update-user")
+async def update_user(
+    request: UserUpdateRequest,  # El modelo con los datos a actualizar
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Decodificar el token para obtener el correo del usuario autenticado
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        authenticated_email = payload.get("sub")
+
+        if not authenticated_email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario en la base de datos por correo
+        user = db.query(User).filter(User.correo == authenticated_email).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Actualizar los campos del usuario con la información del request
+        if request.name:
+            user.nombre = request.name
+        if request.last_name:
+            user.apellido = request.last_name
+        if request.email:
+            user.correo = request.email
+        if request.provider:
+            user.proveedor = request.provider
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Datos de usuario actualizados correctamente",
+            "data": {
+                "name": user.nombre,  
+                "last_name": user.apellido,  
+                "email": user.correo, 
+                "provider": user.proveedor,  
+            },
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Roadmaps
 
