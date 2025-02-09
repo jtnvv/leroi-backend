@@ -714,7 +714,7 @@ async def get_user_profile(
                 "firstName": user.nombre,
                 "lastName": user.apellido,
                 "email": user.correo,
-                "credits": 33,  # Placeholder créditos
+                "credits": user.creditos,
                 "roadmapsCreated": 33,  # Placeholder Roadmaps creados
                 "provider": user.proveedor,
             },
