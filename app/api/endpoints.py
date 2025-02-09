@@ -16,11 +16,11 @@ from app.db.models import (
     ForgotPasswordRequest,
     ResetPasswordRequest,
     PriceRequest,
-    PaymentRequest,
     CorreosBloqueados,
     ProcessFileRequest,
     UserUpdateRequest,
-    TopicRequest
+    TopicRequest,
+    Payment
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price
@@ -32,6 +32,7 @@ import httpx
 import asyncio
 from typing import Dict
 from datetime import datetime, timedelta, timezone
+import json
 
 router = APIRouter()
 security = HTTPBearer()
@@ -41,7 +42,7 @@ ALGORITHM = os.getenv("ALGORITHM")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
 
-TEST_PORT = os.getenv("TEST_PORT")
+BACKEND_URL = os.getenv("BACKEND_URL")
 
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
 
@@ -426,8 +427,8 @@ async def price(request: PriceRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/create-payment")
-async def create_payment(request: PaymentRequest):
+@router.post("/create-payment/{amount}")
+async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     """
     Inicia un pago usando la API de MercadoPago.
 
@@ -437,43 +438,67 @@ async def create_payment(request: PaymentRequest):
     Returns:
         dict: URL para redirigir al usuario.
     """
+    token = credentials.credentials
     try:
-        u_price = calculate_price(request.amount)
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado"
+            )
+
         # Datos del pago
+        id_usuario = user.id_usuario
+        u_price = calculate_price(int(amount))
 
         preference_data = {
             "items": [
                 {
                     "id": 1,
-                    "title": f"Compra de {request.amount} creditos - Leroi",
+                    "title": f"Compra de {amount} creditos - Leroi",
                     "quantity": 1,
                     "unit_price": u_price,
                     "currency_id": "USD",
                 }
             ],
+            "payer": {
+                "name": "John",
+                "surname": "Doe",
+                "email": "john@doe.com",
+            },
             "back_urls": {
-                # "success": "localhost:5173/homepage",
+                "success": "localhost:5173"
                 # "failure": "localhost:5173/order-failed",
                 # "pending": "localhost:5173/pending"
-                "success": "localhost:5173",
-                "failure": "localhost:5173",
-                "pending": "localhost:5173"
             },
-            # "auto_return": "approved",
-            "notification_url": TEST_PORT + "/mercadopago/paymentNotification"
+            "external_reference": {
+                "id_usuario": id_usuario,
+                "cantidad": amount,
+                "precio": u_price,
+            },
+            "auto_return": "approved",
+            "notification_url": BACKEND_URL + "/mercadopago/paymentNotification"
         }
         # Crear el pago
         preference_response = sdk.preference().create(preference_data)
         preference = preference_response["response"]
         # Retornar la URL de aprobación para redirigir al usuario
         payment_url = preference.get("init_point")
+
         return {"payment_url": payment_url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/mercadopago/paymentNotification")
-async def payment_listener(request: Request):
+async def payment_listener(request: Request, db: Session = Depends(get_db)):
     """
     Endpoint para recibir notificaciones de pago de MercadoPago.
 
@@ -486,51 +511,67 @@ async def payment_listener(request: Request):
 
     """
     try:
-        # Obtenemos el cuerpo de la solicitud
+        # Obtener el cuerpo de la solicitud
         body = await request.json()
-        # print("Notificación recibida:", body)
 
-        # Verificamos si la notificación es de pago o de merchant_order
-        # 'topic' en algunas, 'type' en otras
+        # Determinar el tipo de notificación
         topic = body.get("topic") or body.get("type")
-        resource = body.get("resource")
-
-        # Si es de tipo 'merchant_order', ignoramos.
         if topic == "merchant_order":
-            # print(f"Notificación de 'merchant_order': {resource}")
-            # Respondemos con 200 OK para evitar reintentos
-            return {"status": "received"}
+            return {"status": "received"}  # Ignorar y responder con 200 OK
 
-        # Si es de tipo 'payment', obtenemos el ID
-        payment_id = None
-        if topic == "payment":
-            payment_id = body.get("data", {}).get("id")
-        elif "id" in body:  # Compatibilidad con otros formatos
-            payment_id = body["id"]
+        # Obtener el ID de pago si es una notificación de "payment"
+        payment_id = body.get("data", {}).get("id") or body.get("id")
 
         if not payment_id:
-            # print("Error: ID de pago no encontrado en la notificación.")
             return {"status": "error", "message": "ID de pago no encontrado"}, 400
 
         # Intentamos obtener los detalles del pago
         payment = sdk.payment().get(payment_id).get("response")
 
         if not payment:
-            print(f"Error: No se pudo obtener información del pago {
-                  payment_id}")
             return {"status": "error", "message": "Pago no encontrado"}, 400
 
         # Verificamos si el pago fue aprobado
         if payment.get("status") == "approved":
             print(f"Pago aprobado: ID={payment_id}")
+            external_reference = json.loads(payment.get('external_reference'))
 
-            # Lógica para procesamiento de pago
+            # Extraer información de la transacción
+            cantidad = int(external_reference.get("cantidad"))
+            valor_precio = float(external_reference.get("precio"))
+            id_usuario = int(external_reference.get("id_usuario"))
+            fecha_compra = datetime.now()
+
+            # Crear un nuevo objeto de compra
+            compra = Payment(
+                cantidad=cantidad,
+                valor_usd=valor_precio,
+                fecha_compra=fecha_compra,
+                id_usuario=id_usuario
+            )
+
+            db.add(compra)
+
+            # Actualización de creditos del usuario
+            # Obtener el usuario
+            usuario = db.query(User).filter_by(id_usuario=id_usuario).first()
+            if not usuario:
+                print(f"Usuario con ID {id_usuario} no encontrado.")
+                return {"status": "error", "message": "Usuario no encontrado"}, 200
+
+            usuario.creditos += cantidad
+
+            # Añadir la transacción a la base de datos
+
+            db.commit()
+            db.refresh(compra)
+            db.refresh(usuario)
+            # print("Transacción registrada exitosamente.")
 
         return {"status": "success", "message": "Notificación procesada correctamente"}
 
     except Exception as e:
         print(f"Error procesando el webhook: {str(e)}")
-        # Asegurar respuesta en todos los casos
         return {"status": "error", "message": str(e)}, 500
 
 

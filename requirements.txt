@@ -9,5 +9,7 @@ python-dotenv
 PyJWT
 mercadopago
 gunicorn
+httpx
+python-multipart
 psycopg2-binary
 google-generativeai
