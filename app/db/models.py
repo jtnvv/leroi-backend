@@ -81,8 +81,8 @@ class UserUpdateRequest(BaseModel):
     name: str
     last_name: str
     provider: Optional[str]
-
-
+    email: Optional[str]
+    
 class TopicRequest(BaseModel):
     topic: str
 

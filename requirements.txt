@@ -13,3 +13,5 @@ httpx
 python-multipart
 psycopg2-binary
 google-generativeai
+httpx
+python-multipart
