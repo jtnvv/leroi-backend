@@ -614,8 +614,7 @@ async def analyze_file(
         if upload_response.status_code == 200:
             result = upload_response.json()
             analysis_id = result["data"]["id"]
-            analysis_url = f"https://www.virustotal.com/api/v3/analyses/{
-                analysis_id}"
+            analysis_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
 
             max_attempts = 30
             interval = 5
@@ -835,8 +834,7 @@ async def process_file(request: ProcessFileRequest):
     print("Se van a generar los 3 temas")
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
-        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {
-            request.fileBase64}. Quiero que el formato de la respuesta sea una"
+        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
     response = ask_gemini(full_prompt)
@@ -851,12 +849,27 @@ async def generate_roadmap(request: TopicRequest):
     """
     print("Se va a generar la ruta de aprendizaje")
     full_prompt = (
-        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {
-            request.topic}. "
+        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
         f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
         f"cada uno con su propia lista de subtemas adicionales. "
         f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
         f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
+    )
+    response = ask_gemini(full_prompt)
+    parse_resposne = response.replace("json", "").replace("```", "")
+    print("parseado:", parse_resposne)
+    return parse_resposne
+
+
+@router.post("/related-topics")
+async def related_topics(request: TopicRequest):
+    """
+    Obtener temas relacionados a un tema principal
+    """
+    print("Se van a obtener temas relacionados")
+    full_prompt = (
+        f"Eres un experto en la generación de temas relacionados a un tema principal. El tema principal es {request.topic}. Quiero que el formato de la respuesta sea una"
+        f"lista con únicamente MÁXIMO 6 temas relacionados y NADA MÁS, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
     response = ask_gemini(full_prompt)
     parse_resposne = response.replace("json", "").replace("```", "")
