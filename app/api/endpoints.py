@@ -24,7 +24,8 @@ from app.db.models import (
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price
-from app.services.ai import ask_gemini
+from app.services.ai import ask_gemini, count_tokens_gemini
+from app.services.roadmap import price_roadmap
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
 import mercadopago
@@ -825,22 +826,112 @@ async def update_user(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Roadmaps
-
-
-@router.post("/process-file")
-async def process_file(request: ProcessFileRequest):
+@router.post("/preview-cost-process-file")
+async def preview_cost_process_file(
+    request: ProcessFileRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+    ):
     """
-    Procesar un archivo y obtener las roadmaps
+    Obtener un costo estimado de cuanto cuesta procesar cierto archivo
     """
-    print("Se van a generar los 3 temas")
+    # Calcular costo de creditos
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {
             request.fileBase64}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
-    response = ask_gemini(full_prompt)
-    print(response, "tipo:", type(response))
+
+    tokens = count_tokens_gemini(full_prompt)
+
+    if tokens >= 1000000:
+        raise HTTPException(
+            status_code=406, detail="Se superó la cantidad máxima de tokens")
+
+    credits_cost = price_roadmap(tokens)
+
+    # Decodificar el token para obtener el correo del usuario autenticado
+    auth_token = credentials.credentials
+    payload = decode_access_token(auth_token)
+    authenticated_email = payload.get("sub")
+
+    if not authenticated_email:
+        raise HTTPException(status_code=400, detail="Token de Ingreso inválido")
+
+    # Buscar al usuario en la base de datos por correo
+    user = db.query(User).filter(User.correo == authenticated_email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404, detail="Usuario no encontrado")
+
+    # Actualizar la cantidad de creditos
+    user_credits = user.creditos
+
+    response = json.dumps({
+        "user_credits": user_credits,
+        "credits_cost": credits_cost
+    })
+
+    return response
+
+    
+
+
+@router.post("/process-file")
+async def process_file(
+    request: ProcessFileRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+    ):
+    """
+    Procesar un archivo y obtener las roadmaps
+    """
+    # print("Se van a generar los 3 temas")
+    full_prompt = (
+        f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
+        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {
+            request.fileBase64}. Quiero que el formato de la respuesta sea una"
+        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    )
+
+    themes, tokens = ask_gemini(full_prompt)
+
+    themes = json.loads(themes.replace("\n", ""))
+    cost = price_roadmap(int(tokens))
+
+    # Decodificar el token para obtener el correo del usuario autenticado
+    auth_token = credentials.credentials
+    payload = decode_access_token(auth_token)
+    authenticated_email = payload.get("sub")
+
+    if not authenticated_email:
+        raise HTTPException(status_code=400, detail="Token de Ingreso inválido")
+
+    # Buscar al usuario en la base de datos por correo
+    user = db.query(User).filter(User.correo == authenticated_email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404, detail="Usuario no encontrado")
+
+    # Actualizar la cantidad de creditos
+    if user.creditos < cost:
+        raise HTTPException(
+            status_code=402, detail="Creditos insuficientes para la acción")
+
+    user.creditos -= cost
+    db.commit()
+
+    # Retornar la respuesta con los temas del documento y el costo en creditos
+    # print(themes, "tipo:", type(themes))
+
+    response = json.dumps({
+    "themes": themes,
+    "cost": cost
+    })
+    
     return response
 
 
@@ -849,7 +940,7 @@ async def generate_roadmap(request: TopicRequest):
     """
     Generar una roadmap a partir de los temas
     """
-    print("Se va a generar la ruta de aprendizaje")
+    # print("Se va a generar la ruta de aprendizaje")
     full_prompt = (
         f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {
             request.topic}. "
@@ -858,7 +949,8 @@ async def generate_roadmap(request: TopicRequest):
         f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
         f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
     )
-    response = ask_gemini(full_prompt)
+    response, tokens = ask_gemini(full_prompt)
     parse_resposne = response.replace("json", "").replace("```", "")
-    print("parseado:", parse_resposne)
+    # print("parseado:", parse_resposne)
+    # print("Tokens usados para este prompt:", tokens)
     return parse_resposne
