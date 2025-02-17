@@ -615,8 +615,7 @@ async def analyze_file(
         if upload_response.status_code == 200:
             result = upload_response.json()
             analysis_id = result["data"]["id"]
-            analysis_url = f"https://www.virustotal.com/api/v3/analyses/{
-                analysis_id}"
+            analysis_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
 
             max_attempts = 30
             interval = 5
