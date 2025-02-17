@@ -20,7 +20,8 @@ from app.db.models import (
     CorreosBloqueados,
     ProcessFileRequest, 
     UserUpdateRequest,
-    TopicRequest
+    TopicRequest, 
+    Roadmap,
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
@@ -516,7 +517,7 @@ async def analyze_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#View user profile
+#View perfil de usuario
 @router.get("/user-profile")
 async def get_user_profile(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -546,9 +547,10 @@ async def get_user_profile(
         user = db.query(User).filter_by(correo=email).first()
 
         if not user:
-            raise HTTPException(
-                status_code=404, detail="Usuario no encontrado"
-            )
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Obtener el número de roadmaps creados por el usuario
+        roadmaps_count = db.query(Roadmap).filter_by(id_usuario_creador=user.id_usuario).count()
 
         # Preparar la respuesta con los datos del usuario
         return {
@@ -557,10 +559,63 @@ async def get_user_profile(
                 "firstName": user.nombre,
                 "lastName": user.apellido,
                 "email": user.correo,
-                "credits": 33,  #Placeholder créditos
-                "roadmapsCreated": 33, #Placeholder Roadmaps creados
+                "credits": user.creditos,
+                "roadmapsCreated": 0, 
                 "provider": user.proveedor,
             },
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+@router.get("/user-roadmaps")
+async def get_user_roadmaps(
+    credentials: HTTPAuthorizationCredentials = Depends(security),  # Extrae el token
+    db: Session = Depends(get_db),
+):
+    """
+    Devuelve los roadmaps creados por el usuario autenticado.
+
+    Args:
+        credentials (HTTPAuthorizationCredentials): Credenciales de autorización.
+        db (Session): Sesión de la base de datos.
+
+    Returns:
+        dict: Lista de roadmaps del usuario.
+    """
+    token = credentials.credentials  # Obtiene el token de las credenciales
+
+    try:
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Obtener los roadmaps del usuario
+        roadmaps = db.query(Roadmap).filter_by(id_usuario_creador=user.id_usuario).all()
+
+        # Preparar la respuesta con los roadmaps
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "id_roadmap": roadmap.id_roadmap,
+                    "nombre": roadmap.nombre,
+                    "fecha_creacion": roadmap.fecha_creacion,
+                    "prompt": roadmap.prompt,
+                }
+                for roadmap in roadmaps
+            ],
         }
 
     except jwt.ExpiredSignatureError:
@@ -682,19 +737,52 @@ async def process_file(request: ProcessFileRequest):
     return response
 
 @router.post("/generate-roadmap")
-async def generate_roadmap(request: TopicRequest):
-    """
-    Generar una roadmap a partir de los temas
-    """
-    print("Se va a generar la ruta de aprendizaje")
-    full_prompt = (
-        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
-        f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
-        f"cada uno con su propia lista de subtemas adicionales. "
-        f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
-        f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
-    )
-    response = ask_gemini(full_prompt)
-    parse_resposne = response.replace("json", "").replace("```", "")
-    print("parseado:", parse_resposne)
-    return parse_resposne
+async def generate_roadmap(
+    request: TopicRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+
+    token = credentials.credentials 
+
+    try:
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        id_usuario_creador = user.id_usuario
+
+        print("Se va a generar la ruta de aprendizaje")
+        full_prompt = (
+            f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
+            f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
+            f"cada uno con su propia lista de subtemas adicionales. "
+            f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
+            f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
+        )
+        response = ask_gemini(full_prompt)
+        parse_response = response.replace("json", "").replace("```", "")
+        print("parseado:", parse_response)
+
+        new_roadmap = Roadmap(
+            nombre=request.topic,  # Nombre del roadmap (usamos el tema como nombre)
+            id_usuario_creador=id_usuario_creador,  # ID del usuario autenticado
+            prompt=parse_response  # Respuesta de Gemini (cadena de texto)
+        )
+        db.add(new_roadmap)
+        db.commit()
+        db.refresh(new_roadmap)
+
+        return parse_response
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")

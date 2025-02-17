@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, func
 from .session import Base
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -31,6 +31,7 @@ class User(Base):
     correo = Column(String, index=True, nullable=False)
     contraseña = Column(String, nullable=True)
     proveedor = Column(String, nullable=True, default='local')
+    creditos = Column(Integer, nullable=False, default=0)
 
 
 class VerificationCode(Base):
@@ -89,3 +90,12 @@ class UserUpdateRequest(BaseModel):
     
 class TopicRequest(BaseModel):
     topic: str
+
+class Roadmap(Base):
+    __tablename__ = "roadmap" 
+
+    id_roadmap = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    nombre = Column(String, nullable=False)  # Nombre del roadmap
+    fecha_creacion = Column(DateTime, default=func.now())  # Fecha de creación automática
+    id_usuario_creador = Column(Integer, ForeignKey("usuario.id_usuario"), nullable=False)  # ID del usuario creador
+    prompt = Column(String, nullable=False)  # Respuesta de Gemini (cadena de texto)
