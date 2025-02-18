@@ -335,13 +335,12 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
                 <html>
                     <body style="font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 40px;">
                         <h1 style="font-size: 30px; font-weight: bold; color: #ffb923;">Restablecimiento de Contraseña</h1>
-                        <p style="font-size: 20px; color: #000000;">Haz clic en el enlace para restablecer tu contraseña:</p>
-                        <a href="{reset_link}" style="font-size: 20px; color: #835bfc;">Restablecer Contraseña</a>
+                        <p style="font-size: 20px; color: #000000;">Haz clic en el enlace para restablecer tu contraseña:</p><a href=" {reset_link} " style="font-size: 20px; color: #835bfc;">Restablecer Contraseña</a>
                         <p style="font-size: 16px; color: #000000;">Este enlace expirará en 10 minutos.</p>
                         <p style="font-size: 16px; color: #000000;">Si no solicitaste este cambio, puedes ignorar este correo.</p>
                     </body>
                 </html>
-            """,
+                """,
             subtype="html"
         )
 
@@ -837,8 +836,7 @@ async def preview_cost_process_file(
     # Calcular costo de creditos
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
-        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {
-            request.fileBase64}. Quiero que el formato de la respuesta sea una"
+        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
 
@@ -890,8 +888,7 @@ async def process_file(
     # print("Se van a generar los 3 temas")
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
-        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {
-            request.fileBase64}. Quiero que el formato de la respuesta sea una"
+        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
 
@@ -941,8 +938,7 @@ async def generate_roadmap(request: TopicRequest):
     """
     # print("Se va a generar la ruta de aprendizaje")
     full_prompt = (
-        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {
-            request.topic}. "
+        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
         f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
         f"cada uno con su propia lista de subtemas adicionales. "
         f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
