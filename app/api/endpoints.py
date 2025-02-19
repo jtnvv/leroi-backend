@@ -949,3 +949,19 @@ async def generate_roadmap(request: TopicRequest):
     # print("parseado:", parse_resposne)
     # print("Tokens usados para este prompt:", tokens)
     return parse_resposne
+
+
+@router.post("/related-topics")
+async def related_topics(request: TopicRequest):
+    """
+    Obtener temas relacionados a un tema principal
+    """
+    print("Se van a obtener temas relacionados")
+    full_prompt = (
+        f"Eres un experto en la generación de temas relacionados a un tema principal. El tema principal es {request.topic}. Quiero que el formato de la respuesta sea una"
+        f"lista con únicamente MÁXIMO 6 temas relacionados y NADA MÁS, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    )
+    response = ask_gemini(full_prompt)
+    parse_resposne = response.replace("json", "").replace("```", "")
+    print("parseado:", parse_resposne)
+    return parse_resposne
