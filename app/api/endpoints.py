@@ -22,6 +22,7 @@ from app.db.models import (
     UserUpdateRequest,
     TopicRequest, 
     Roadmap,
+    RoadmapImageRequest,
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
 from app.services.pricing import calculate_price, initiate_payment
@@ -771,16 +772,58 @@ async def generate_roadmap(
         parse_response = response.replace("json", "").replace("```", "")
         print("parseado:", parse_response)
 
+        return parse_response
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+
+@router.post("/save-roadmap-image")
+async def save_roadmap_image(
+    request: RoadmapImageRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    token = credentials.credentials 
+
+    try:
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        user = db.query(User).filter_by(correo=email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        id_usuario_creador = user.id_usuario
+
+        # Verificar si el roadmap ya existe
+        existing_roadmap = db.query(Roadmap).filter_by(
+            nombre=request.topic, id_usuario_creador=id_usuario_creador
+        ).first()
+
+        if existing_roadmap:
+            # Si ya existe, solo actualizamos la imagen
+            existing_roadmap.image = request.image_base64
+            db.commit()
+            return {"message": "Imagen actualizada correctamente"}
+
+        # Si no existe, lo creamos con la imagen
         new_roadmap = Roadmap(
-            nombre=request.topic,  # Nombre del roadmap (usamos el tema como nombre)
-            id_usuario_creador=id_usuario_creador,  # ID del usuario autenticado
-            prompt=parse_response  # Respuesta de Gemini (cadena de texto)
+            nombre=request.topic,
+            id_usuario_creador=id_usuario_creador,
+            prompt=request.roadmap_data,  # Guardamos la información generada
+            image_base64=request.image_base64  # Guardamos la imagen en base64
         )
         db.add(new_roadmap)
         db.commit()
         db.refresh(new_roadmap)
 
-        return parse_response
+        return {"message": "Roadmap y imagen guardados correctamente"}
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")

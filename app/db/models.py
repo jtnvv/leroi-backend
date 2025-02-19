@@ -95,7 +95,13 @@ class Roadmap(Base):
     __tablename__ = "roadmap" 
 
     id_roadmap = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    nombre = Column(String, nullable=False)  # Nombre del roadmap
-    fecha_creacion = Column(DateTime, default=func.now())  # Fecha de creación automática
-    id_usuario_creador = Column(Integer, ForeignKey("usuario.id_usuario"), nullable=False)  # ID del usuario creador
-    prompt = Column(String, nullable=False)  # Respuesta de Gemini (cadena de texto)
+    nombre = Column(String, nullable=False)
+    fecha_creacion = Column(DateTime, default=func.now())
+    id_usuario_creador = Column(Integer, ForeignKey("usuario.id_usuario"), nullable=False)
+    prompt = Column(String, nullable=False)  # Respuesta de Gemini
+    image_base64 = Column(String, nullable=True)  # Imagen en Base64
+
+class RoadmapImageRequest(BaseModel):
+    topic: str  # Nombre del roadmap
+    roadmap_data: str  # Respuesta de Gemini
+    image_base64: str  # Imagen del roadmap 
