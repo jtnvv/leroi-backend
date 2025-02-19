@@ -614,6 +614,7 @@ async def get_user_roadmaps(
                     "nombre": roadmap.nombre,
                     "fecha_creacion": roadmap.fecha_creacion,
                     "prompt": roadmap.prompt,
+                    "image": roadmap.image_base64,
                 }
                 for roadmap in roadmaps
             ],
