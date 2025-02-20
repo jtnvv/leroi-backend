@@ -476,9 +476,9 @@ async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials 
                 "email": "john@doe.com",
             },
             "back_urls": {
-                "success": BACKEND_URL
-                # "failure": "localhost:5173/order-failed",
-                # "pending": "localhost:5173/pending"
+                "success": FRONTEND_URL
+                "failure": FRONTEND_URL,
+                "pending": FRONTEND_URL,
             },
             "external_reference": {
                 "id_usuario": id_usuario,
