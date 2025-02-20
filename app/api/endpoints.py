@@ -945,6 +945,7 @@ async def generate_roadmap(request: TopicRequest):
         f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
     )
     response, tokens = ask_gemini(full_prompt)
+    print("DIOOOO", response)
     parse_resposne = response.replace("json", "").replace("```", "")
     # print("parseado:", parse_resposne)
     # print("Tokens usados para este prompt:", tokens)
@@ -961,7 +962,7 @@ async def related_topics(request: TopicRequest):
         f"Eres un experto en la generación de temas relacionados a un tema principal. El tema principal es {request.topic}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente MÁXIMO 6 temas relacionados y NADA MÁS, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
-    response = ask_gemini(full_prompt)
+    response, tokens = ask_gemini(full_prompt)
     parse_resposne = response.replace("json", "").replace("```", "")
     print("parseado:", parse_resposne)
     return parse_resposne
