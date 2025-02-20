@@ -632,12 +632,11 @@ async def delete_user(
     db: Session = Depends(get_db)
 ):
     """
-    Eliminar un usuario por correo electrónico.
+    Eliminar un usuario y sus roadmaps asociados.
     """
     token = credentials.credentials
 
     try:
-        # Decodificar el token para obtener el email y el rol del usuario autenticado
         payload = decode_access_token(token)
         authenticated_email = payload.get("sub")
         user_role = payload.get("role")
@@ -645,17 +644,18 @@ async def delete_user(
         if not authenticated_email:
             raise HTTPException(status_code=400, detail="Invalid token")
 
-        # Verificar si el usuario autenticado es un administrador o el propio usuario
         if user_role != "admin" and authenticated_email != email:
             raise HTTPException(status_code=403, detail="Unauthorized action")
 
-        # Buscar el usuario en la base de datos
+        # Buscar usuario en la base de datos
         user_to_delete = db.query(User).filter_by(correo=email).first()
         if not user_to_delete:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Eliminar los roadmaps del usuario antes de eliminarlo
+        db.query(Roadmap).filter(Roadmap.id_usuario_creador == user_to_delete.id_usuario).delete(synchronize_session=False)
+
         # Eliminar usuario
-        print(f"Deleting user: {user_to_delete.correo}")  # Log para depuración
         db.delete(user_to_delete)
         db.commit()
 
@@ -671,7 +671,9 @@ async def delete_user(
         raise HTTPException(status_code=401, detail="Invalid token")
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error al borrar usuario: {e}")  # 👈 Imprime el error en consola
+        raise HTTPException(status_code=500, detail=str(e))        
+
 
 @router.put("/update-user")
 async def update_user(

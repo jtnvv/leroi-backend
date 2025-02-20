@@ -97,7 +97,7 @@ class Roadmap(Base):
     id_roadmap = Column(Integer, primary_key=True, index=True, autoincrement=True)
     nombre = Column(String, nullable=False)
     fecha_creacion = Column(DateTime, default=func.now())
-    id_usuario_creador = Column(Integer, ForeignKey("usuario.id_usuario"), nullable=False)
+    id_usuario_creador = Column(Integer, ForeignKey("usuario.id_usuario", ondelete="CASCADE"), nullable=False)
     prompt = Column(String, nullable=False)  # Respuesta de Gemini
     image_base64 = Column(String, nullable=True)  # Imagen en Base64
 
