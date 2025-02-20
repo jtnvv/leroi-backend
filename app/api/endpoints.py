@@ -561,7 +561,7 @@ async def get_user_profile(
                 "lastName": user.apellido,
                 "email": user.correo,
                 "credits": user.creditos,
-                "roadmapsCreated": 0, 
+                "roadmapsCreated": roadmaps_count, 
                 "provider": user.proveedor,
             },
         }
@@ -604,6 +604,7 @@ async def get_user_roadmaps(
 
         # Obtener los roadmaps del usuario
         roadmaps = db.query(Roadmap).filter_by(id_usuario_creador=user.id_usuario).all()
+        
 
         # Preparar la respuesta con los roadmaps
         return {
