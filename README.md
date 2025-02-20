@@ -17,8 +17,10 @@
 ## 🚧 Estado del proyecto
 
 El desarrollo de LEROI está en curso. Actualmente, estamos trabajando en:
-- Direccionamiento del proyecto.
-- Modelado e implementación de la base de datos.
+
+- Analisis de virus
+- Gemini API
+- Mercado Pago API
 
 ## 📧 Contacto
 
