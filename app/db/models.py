@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, func
+
 from .session import Base
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -30,6 +31,7 @@ class User(Base):
     apellido = Column(String, index=True, nullable=False)
     correo = Column(String, index=True, nullable=False)
     contraseña = Column(String, nullable=True)
+    creditos = Column(Integer, nullable=False, default=0)
     proveedor = Column(String, nullable=True, default='local')
     creditos = Column(Integer, nullable=False, default=0)
 
@@ -58,21 +60,15 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
-class PriceRequest(BaseModel):
-    amount: int
-
-
-class PaymentRequest(BaseModel):
-    amount: int
-
 class CorreosBloqueados(Base):
     __tablename__ = "correos_bloqueados"
 
     id = Column(Integer, primary_key=True, index=True)
     correo = Column(String, unique=True, nullable=False)
     fecha_bloqueo = Column(DateTime, default=datetime.now(timezone.utc))
-    intentos_fallidos = Column(Integer, default=0)  # Contador de intentos fallidos
-    bloqueado_hasta = Column(DateTime, nullable=True)  
+    # Contador de intentos fallidos
+    intentos_fallidos = Column(Integer, default=0)
+    bloqueado_hasta = Column(DateTime, nullable=True)
     correos_login = Column(String, nullable=True)
 
 
@@ -82,6 +78,7 @@ class ProcessFileRequest(BaseModel):
     fileSize: int
     fileBase64: str
 
+
 class UserUpdateRequest(BaseModel):
     name: str
     last_name: str
@@ -90,6 +87,7 @@ class UserUpdateRequest(BaseModel):
     
 class TopicRequest(BaseModel):
     topic: str
+
 
 class Roadmap(Base):
     __tablename__ = "roadmap" 
@@ -105,3 +103,19 @@ class RoadmapImageRequest(BaseModel):
     topic: str  # Nombre del roadmap
     roadmap_data: str  # Respuesta de Gemini
     image_base64: str  # Imagen del roadmap 
+
+
+class PriceRequest(BaseModel):
+    amount: int
+
+
+class Payment(Base):
+    __tablename__ = 'compra'
+
+    id_compra = Column(Integer, primary_key=True, index=True)
+    cantidad = Column(Integer, index=True, nullable=False)
+    valor_usd = Column(Float, index=True, nullable=False)
+    fecha_compra = Column(DateTime, index=True, nullable=False,
+                          default=datetime.now(timezone.utc))
+    id_usuario = Column(ForeignKey("usuario.id_usuario"))
+
