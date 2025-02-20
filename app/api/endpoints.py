@@ -443,8 +443,6 @@ async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials 
     token = credentials.credentials
     try:
         # Decodificar el token para obtener el correo del usuario
-        print(f"Token: {token}")
-        print(f"Credentials: {credentials}")
         payload = decode_access_token(token)
         email = payload.get("sub")
         if not email:
@@ -478,7 +476,7 @@ async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials 
                 "email": "john@doe.com",
             },
             "back_urls": {
-                "success": "localhost:5173"
+                "success": "BACKEND_URL"
                 # "failure": "localhost:5173/order-failed",
                 # "pending": "localhost:5173/pending"
             },
