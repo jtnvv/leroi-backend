@@ -443,6 +443,8 @@ async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials 
     token = credentials.credentials
     try:
         # Decodificar el token para obtener el correo del usuario
+        print(f"Token: {token}")
+        print(f"Credentials: {credentials}")
         payload = decode_access_token(token)
         email = payload.get("sub")
         if not email:
