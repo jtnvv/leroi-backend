@@ -476,7 +476,7 @@ async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials 
                 "email": "john@doe.com",
             },
             "back_urls": {
-                "success": FRONTEND_URL
+                "success": FRONTEND_URL,
                 "failure": FRONTEND_URL,
                 "pending": FRONTEND_URL,
             },
