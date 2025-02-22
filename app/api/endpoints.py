@@ -1073,6 +1073,7 @@ async def related_topics(request: TopicRequest):
     full_prompt = (
         f"Eres un experto en la generación de temas relacionados a un tema principal. El tema principal es {request.topic}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente MÁXIMO 6 temas relacionados y NADA MÁS, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+        f"Y que ademas, Cada tema debe tener una longitud máxima de 45 caracteres.  "
     )
     response, tokens = ask_gemini(full_prompt)
     parse_resposne = response.replace("json", "").replace("```", "")
