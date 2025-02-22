@@ -41,3 +41,9 @@ env
 .env.production
 .env.test
 .env.staging
+
+# Ignorar archivos de bytecode de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

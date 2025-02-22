@@ -193,7 +193,8 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
         apellido=request.last_name if request.last_name else '',
         correo=request.email,
         contraseña=hashed_password,
-        proveedor=request.provider
+        proveedor=request.provider,
+        creditos=1000
     )
 
     # Añade el usuario a la base de datos
@@ -204,7 +205,6 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
     return {"status": "success", "message": "Usuario registrado correctamente"}
 
 # LOGIN
-
 
 @router.post("/login-google")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
@@ -218,7 +218,8 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
             apellido='',
             correo=request.email,
             contraseña=None,
-            proveedor="google"
+            proveedor="google",
+            creditos=1000
         )
         db.add(user)
         db.commit()
