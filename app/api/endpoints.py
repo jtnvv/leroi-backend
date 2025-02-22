@@ -1,7 +1,7 @@
 import jwt
 import os
 import base64
-from fastapi import APIRouter,Depends,UploadFile, File, HTTPException,Form
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Request
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
 from sqlalchemy.orm import Session
@@ -16,23 +16,26 @@ from app.db.models import (
     ForgotPasswordRequest,
     ResetPasswordRequest,
     PriceRequest,
-    PaymentRequest,
     CorreosBloqueados,
-    ProcessFileRequest, 
+    ProcessFileRequest,
     UserUpdateRequest,
     TopicRequest, 
     Roadmap,
     RoadmapImageRequest,
+    Payment
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
-from app.services.pricing import calculate_price, initiate_payment
-from app.services.ai import  ask_gemini
+from app.services.pricing import calculate_price
+from app.services.ai import ask_gemini, count_tokens_gemini
+from app.services.roadmap import price_roadmap
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta
+import mercadopago
 import httpx
 import asyncio
 from typing import Dict
 from datetime import datetime, timedelta, timezone
+import json
 
 router = APIRouter()
 security = HTTPBearer()
@@ -40,6 +43,11 @@ security = HTTPBearer()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
+MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
+
+BACKEND_URL = os.getenv("BACKEND_URL")
+
+sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
 
 
 def get_db():
@@ -163,14 +171,18 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
     Returns:
         dict: Estado y mensaje de éxito tras el registro.
     """
-    #Impedir el registro por bloqueo
-    blocked_email = db.query(CorreosBloqueados).filter(CorreosBloqueados.correo == request.email).first()
+    # Impedir el registro por bloqueo
+    blocked_email = db.query(CorreosBloqueados).filter(
+        CorreosBloqueados.correo == request.email).first()
     if blocked_email:
-        raise HTTPException(status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
-    #Impedir el registro por bloqueo
-    blocked_email = db.query(CorreosBloqueados).filter(CorreosBloqueados.correo == request.email).first()
+        raise HTTPException(
+            status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
+    # Impedir el registro por bloqueo
+    blocked_email = db.query(CorreosBloqueados).filter(
+        CorreosBloqueados.correo == request.email).first()
     if blocked_email:
-        raise HTTPException(status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
+        raise HTTPException(
+            status_code=400, detail="Este correo está bloqueado y no puede registrarse.")
     # Hashea la contraseña si está presente
     hashed_password = get_password_hash(
         request.password) if request.password else None
@@ -216,10 +228,12 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
 
     return {"status": "success", "access_token": access_token, "token_type": "bearer"}
 
-#Login normal
+# Login normal
 
-MAX_ATTEMPTS = 5  
-BLOCK_TIME = timedelta(minutes=15)  
+MAX_ATTEMPTS = 5
+BLOCK_TIME = timedelta(minutes=15)
+
+
 @router.post("/login")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(correo=request.email).first()
@@ -227,28 +241,34 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     if user.proveedor == "google":
-        raise HTTPException(status_code=401, detail="Ya has iniciado sesión con Google")
-    
-    blocked_user = db.query(CorreosBloqueados).filter_by(correos_login=request.email).first()
+        raise HTTPException(
+            status_code=401, detail="Ya has iniciado sesión con Google")
+
+    blocked_user = db.query(CorreosBloqueados).filter_by(
+        correos_login=request.email).first()
 
     if blocked_user:
         if blocked_user.bloqueado_hasta and blocked_user.bloqueado_hasta.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-            
-            raise HTTPException(status_code=403, detail="Tu cuenta está bloqueada temporalmente. Intenta más tarde.")
+
+            raise HTTPException(
+                status_code=403, detail="Tu cuenta está bloqueada temporalmente. Intenta más tarde.")
 
     if not verify_password(request.password, user.contraseña):
-        
+
         if not blocked_user:
-            blocked_user = CorreosBloqueados(correos_login=request.email, correo=request.email, intentos_fallidos=1)
+            blocked_user = CorreosBloqueados(
+                correos_login=request.email, correo=request.email, intentos_fallidos=1)
             db.add(blocked_user)
         else:
             blocked_user.intentos_fallidos += 1
-        
+
         if blocked_user.intentos_fallidos >= MAX_ATTEMPTS:
-            blocked_user.bloqueado_hasta = datetime.now(timezone.utc) + BLOCK_TIME
-            db.commit()  
-            raise HTTPException(status_code=403, detail="Tu cuenta ha sido bloqueada temporalmente debido a intentos fallidos.")
-        db.commit()  
+            blocked_user.bloqueado_hasta = datetime.now(
+                timezone.utc) + BLOCK_TIME
+            db.commit()
+            raise HTTPException(
+                status_code=403, detail="Tu cuenta ha sido bloqueada temporalmente debido a intentos fallidos.")
+        db.commit()
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
     if blocked_user:
         db.delete(blocked_user)
@@ -317,13 +337,12 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
                 <html>
                     <body style="font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 40px;">
                         <h1 style="font-size: 30px; font-weight: bold; color: #ffb923;">Restablecimiento de Contraseña</h1>
-                        <p style="font-size: 20px; color: #000000;">Haz clic en el enlace para restablecer tu contraseña:</p>
-                        <a href="{reset_link}" style="font-size: 20px; color: #835bfc;">Restablecer Contraseña</a>
+                        <p style="font-size: 20px; color: #000000;">Haz clic en el enlace para restablecer tu contraseña:</p><a href=" {reset_link} " style="font-size: 20px; color: #835bfc;">Restablecer Contraseña</a>
                         <p style="font-size: 16px; color: #000000;">Este enlace expirará en 10 minutos.</p>
                         <p style="font-size: 16px; color: #000000;">Si no solicitaste este cambio, puedes ignorar este correo.</p>
                     </body>
                 </html>
-            """,
+                """,
             subtype="html"
         )
 
@@ -410,10 +429,10 @@ async def price(request: PriceRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/create-payment")
-async def create_payment(request: PaymentRequest):
+@router.post("/create-payment/{amount}")
+async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     """
-    Crear enlace de pago
+    Inicia un pago usando la API de MercadoPago.
 
     Args:
         request (PaymentRequest): Datos del pago enviados desde el frontend.
@@ -421,31 +440,162 @@ async def create_payment(request: PaymentRequest):
     Returns:
         dict: URL para redirigir al usuario.
     """
+    token = credentials.credentials
     try:
-        payment_url = await initiate_payment(request)
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado"
+            )
+
+        # Datos del pago
+        id_usuario = user.id_usuario
+        u_price = calculate_price(int(amount))
+
+        preference_data = {
+            "items": [
+                {
+                    "id": 1,
+                    "title": f"Compra de {amount} creditos - Leroi",
+                    "quantity": 1,
+                    "unit_price": u_price,
+                    "currency_id": "USD",
+                }
+            ],
+            "payer": {
+                "name": "John",
+                "surname": "Doe",
+                "email": "john@doe.com",
+            },
+            "back_urls": {
+                "success": FRONTEND_URL,
+                "failure": FRONTEND_URL,
+                "pending": FRONTEND_URL,
+            },
+            "external_reference": {
+                "id_usuario": id_usuario,
+                "cantidad": amount,
+                "precio": u_price,
+            },
+            "auto_return": "approved",
+            "notification_url": BACKEND_URL + "/mercadopago/paymentNotification"
+        }
+        # Crear el pago
+        preference_response = sdk.preference().create(preference_data)
+        preference = preference_response["response"]
+        # Retornar la URL de aprobación para redirigir al usuario
+        payment_url = preference.get("init_point")
+
         return {"payment_url": payment_url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/mercadopago/paymentNotification")
+async def payment_listener(request: Request, db: Session = Depends(get_db)):
+    """
+    Endpoint para recibir notificaciones de pago de MercadoPago.
+
+    Args:
+        request (PaymentRequest): Datos enviados desde MercadoPago.
+
+    Returns:
+        status: 200 (En caso de que todo esté bien)
+        status: diferente de 200 (En caso de que exista algún error)
+
+    """
+    try:
+        # Obtener el cuerpo de la solicitud
+        body = await request.json()
+
+        # Determinar el tipo de notificación
+        topic = body.get("topic") or body.get("type")
+        if topic == "merchant_order":
+            return {"status": "received"}  # Ignorar y responder con 200 OK
+
+        # Obtener el ID de pago si es una notificación de "payment"
+        payment_id = body.get("data", {}).get("id") or body.get("id")
+
+        if not payment_id:
+            return {"status": "error", "message": "ID de pago no encontrado"}, 400
+
+        # Intentamos obtener los detalles del pago
+        payment = sdk.payment().get(payment_id).get("response")
+
+        if not payment:
+            return {"status": "error", "message": "Pago no encontrado"}, 400
+
+        # Verificamos si el pago fue aprobado
+        if payment.get("status") == "approved":
+            print(f"Pago aprobado: ID={payment_id}")
+            external_reference = json.loads(payment.get('external_reference'))
+
+            # Extraer información de la transacción
+            cantidad = int(external_reference.get("cantidad"))
+            valor_precio = float(external_reference.get("precio"))
+            id_usuario = int(external_reference.get("id_usuario"))
+            fecha_compra = datetime.now()
+
+            # Crear un nuevo objeto de compra
+            compra = Payment(
+                cantidad=cantidad,
+                valor_usd=valor_precio,
+                fecha_compra=fecha_compra,
+                id_usuario=id_usuario
+            )
+
+            db.add(compra)
+
+            # Actualización de creditos del usuario
+            # Obtener el usuario
+            usuario = db.query(User).filter_by(id_usuario=id_usuario).first()
+            if not usuario:
+                print(f"Usuario con ID {id_usuario} no encontrado.")
+                return {"status": "error", "message": "Usuario no encontrado"}, 200
+
+            usuario.creditos += cantidad
+
+            # Añadir la transacción a la base de datos
+
+            db.commit()
+            db.refresh(compra)
+            db.refresh(usuario)
+            # print("Transacción registrada exitosamente.")
+
+        return {"status": "success", "message": "Notificación procesada correctamente"}
+
+    except Exception as e:
+        print(f"Error procesando el webhook: {str(e)}")
+        return {"status": "error", "message": str(e)}, 500
 
 
-#Analisis De Malware 
+# Analisis De Malware
 API_KEY = os.getenv("API_KEY")
 UPLOAD_URL = "https://www.virustotal.com/api/v3/files"
 HEADERS = {
     "x-apikey": API_KEY
 }
 
+
 async def fetch_analysis(analysis_url: str):
     async with httpx.AsyncClient() as client:
         response = await client.get(analysis_url, headers=HEADERS)
-        response.raise_for_status()  
+        response.raise_for_status()
         return response.json()
+
+
 @router.post("/analyze/")
 async def analyze_file(
-    file: UploadFile = File(...), 
-    email: str = Form(...), 
+    file: UploadFile = File(...),
+    email: str = Form(...),
     db: Session = Depends(get_db)
 ) -> Dict:
     """
@@ -453,11 +603,11 @@ async def analyze_file(
     """
     if not API_KEY:
         raise HTTPException(status_code=400, detail="API Key is missing")
-    
-    #if file.content_type != "application/pdf":
+
+    # if file.content_type != "application/pdf":
      #  raise HTTPException(status_code=400, detail="Solo se permite subir archivos PDF")
 
-    try: 
+    try:
         file_content = await file.read()
 
         async with httpx.AsyncClient() as client:
@@ -469,7 +619,7 @@ async def analyze_file(
             analysis_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
 
             max_attempts = 30
-            interval = 5  
+            interval = 5
 
             for attempt in range(max_attempts):
                 analysis_data = await fetch_analysis(analysis_url)
@@ -485,12 +635,14 @@ async def analyze_file(
 
                     if has_virus:
                         # Eliminar usuario y bloquear correo si tiene virus
-                        user = db.query(User).filter(User.correo == email).first()
+                        user = db.query(User).filter(
+                            User.correo == email).first()
                         if user:
                             db.delete(user)
                             db.commit()
 
-                            blocked_email = CorreosBloqueados(correo=email, fecha_bloqueo=datetime.now(timezone.utc))
+                            blocked_email = CorreosBloqueados(
+                                correo=email, fecha_bloqueo=datetime.now(timezone.utc))
                             db.add(blocked_email)
                             db.commit()
 
@@ -510,15 +662,20 @@ async def analyze_file(
                             "message": "Este archivo es seguro"
                         }
                 await asyncio.sleep(interval)
-            raise HTTPException(status_code=408, detail="El análisis no se completó en el tiempo esperado.")
+            raise HTTPException(
+                status_code=408, detail="El análisis no se completó en el tiempo esperado.")
         else:
-            raise HTTPException(status_code=upload_response.status_code, detail=upload_response.json())
+            raise HTTPException(
+                status_code=upload_response.status_code, detail=upload_response.json())
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#View perfil de usuario
+
+
+# View user profile
+
 @router.get("/user-profile")
 async def get_user_profile(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -626,6 +783,7 @@ async def get_user_roadmaps(
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
 
+
 @router.delete("/delete-user/{email}")
 async def delete_user(
     email: str,
@@ -676,6 +834,7 @@ async def delete_user(
         raise HTTPException(status_code=500, detail=str(e))        
 
 
+
 @router.put("/update-user")
 async def update_user(
     request: UserUpdateRequest,  # El modelo con los datos a actualizar
@@ -695,7 +854,8 @@ async def update_user(
         user = db.query(User).filter(User.correo == authenticated_email).first()
 
         if not user:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+            raise HTTPException(
+                status_code=404, detail="Usuario no encontrado")
 
         # Actualizar los campos del usuario con la información del request
         if request.name:
@@ -725,63 +885,132 @@ async def update_user(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Roadmaps
-
-@router.post("/process-file")
-async def process_file(request: ProcessFileRequest):
+@router.post("/preview-cost-process-file")
+async def preview_cost_process_file(
+    request: ProcessFileRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+    ):
     """
-    Procesar un archivo y obtener las roadmaps
+    Obtener un costo estimado de cuanto cuesta procesar cierto archivo
     """
-    print("Se van a generar los 3 temas")
+    # Calcular costo de creditos
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
-    response = ask_gemini(full_prompt)
-    print(response, "tipo:" ,type(response))
+
+    tokens = count_tokens_gemini(full_prompt)
+
+    if tokens >= 1000000:
+        raise HTTPException(
+            status_code=406, detail="Se superó la cantidad máxima de tokens")
+
+    credits_cost = price_roadmap(tokens)
+
+    # Decodificar el token para obtener el correo del usuario autenticado
+    auth_token = credentials.credentials
+    payload = decode_access_token(auth_token)
+    authenticated_email = payload.get("sub")
+
+    if not authenticated_email:
+        raise HTTPException(status_code=400, detail="Token de Ingreso inválido")
+
+    # Buscar al usuario en la base de datos por correo
+    user = db.query(User).filter(User.correo == authenticated_email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404, detail="Usuario no encontrado")
+
+    # Actualizar la cantidad de creditos
+    user_credits = user.creditos
+
+    response = json.dumps({
+        "user_credits": user_credits,
+        "credits_cost": credits_cost
+    })
+
     return response
 
-@router.post("/generate-roadmap")
-async def generate_roadmap(
-    request: TopicRequest,
+    
+
+
+@router.post("/process-file")
+async def process_file(
+    request: ProcessFileRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)
+    ):
+    """
+    Procesar un archivo y obtener las roadmaps
+    """
+    # print("Se van a generar los 3 temas")
+    full_prompt = (
+        f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
+        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
+        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    )
 
-    token = credentials.credentials 
+    themes, tokens = ask_gemini(full_prompt)
 
-    try:
-        payload = decode_access_token(token)
-        email = payload.get("sub")
+    themes = json.loads(themes.replace("\n", ""))
+    cost = price_roadmap(int(tokens))
 
-        if not email:
-            raise HTTPException(status_code=400, detail="Token inválido")
+    # Decodificar el token para obtener el correo del usuario autenticado
+    auth_token = credentials.credentials
+    payload = decode_access_token(auth_token)
+    authenticated_email = payload.get("sub")
 
-        user = db.query(User).filter_by(correo=email).first()
+    if not authenticated_email:
+        raise HTTPException(status_code=400, detail="Token de Ingreso inválido")
 
-        if not user:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    # Buscar al usuario en la base de datos por correo
+    user = db.query(User).filter(User.correo == authenticated_email).first()
 
-        id_usuario_creador = user.id_usuario
+    if not user:
+        raise HTTPException(
+            status_code=404, detail="Usuario no encontrado")
 
-        print("Se va a generar la ruta de aprendizaje")
-        full_prompt = (
-            f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
-            f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
-            f"cada uno con su propia lista de subtemas adicionales. "
-            f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
-            f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
-        )
-        response = ask_gemini(full_prompt)
-        parse_response = response.replace("json", "").replace("```", "")
-        print("parseado:", parse_response)
+    # Actualizar la cantidad de creditos
+    if user.creditos < cost:
+        raise HTTPException(
+            status_code=402, detail="Creditos insuficientes para la acción")
 
-        return parse_response
+    user.creditos -= cost
+    db.commit()
 
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expirado")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Token inválido")
+    # Retornar la respuesta con los temas del documento y el costo en creditos
+    # print(themes, "tipo:", type(themes))
+
+    response = json.dumps({
+    "themes": themes,
+    "cost": cost
+    })
+    
+    return response
+
+
+@router.post("/generate-roadmap")
+async def generate_roadmap(request: TopicRequest):
+    """
+    Generar una roadmap a partir de los temas
+    """
+    # print("Se va a generar la ruta de aprendizaje")
+    full_prompt = (
+        f"Eres un experto en la creación de rutas de aprendizaje basadas en un tema específico. El tema principal es {request.topic}. "
+        f"Quiero que el formato de la respuesta sea un diccionario anidado donde la clave sea el tema principal y los valores sean diccionarios de subtemas, "
+        f"cada uno con su propia lista de subtemas adicionales. "
+        f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
+        f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
+    )
+    response, tokens = ask_gemini(full_prompt)
+    print("DIOOOO", response)
+    parse_resposne = response.replace("json", "").replace("```", "")
+    # print("parseado:", parse_resposne)
+    # print("Tokens usados para este prompt:", tokens)
+    return parse_resposne
 
 
 @router.post("/save-roadmap-image")
@@ -833,3 +1062,20 @@ async def save_roadmap_image(
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
+
+
+@router.post("/related-topics")
+async def related_topics(request: TopicRequest):
+    """
+    Obtener temas relacionados a un tema principal
+    """
+    print("Se van a obtener temas relacionados")
+    full_prompt = (
+        f"Eres un experto en la generación de temas relacionados a un tema principal. El tema principal es {request.topic}. Quiero que el formato de la respuesta sea una"
+        f"lista con únicamente MÁXIMO 6 temas relacionados y NADA MÁS, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    )
+    response, tokens = ask_gemini(full_prompt)
+    parse_resposne = response.replace("json", "").replace("```", "")
+    print("parseado:", parse_resposne)
+    return parse_resposne
+
