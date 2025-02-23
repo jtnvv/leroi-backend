@@ -1,7 +1,7 @@
 import jwt
 import os
 import base64
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Request
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Request,Body
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from app.db.models import (
     TopicRequest, 
     Roadmap,
     RoadmapImageRequest,
+    DeleteRoadmapImageRequest,
     Payment
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
@@ -1058,6 +1059,40 @@ async def save_roadmap_image(
         db.refresh(new_roadmap)
 
         return {"message": "Roadmap y imagen guardados correctamente"}
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    
+@router.delete("/delete-roadmap-image")
+async def delete_roadmap_image(
+    request: DeleteRoadmapImageRequest = Body(...),  
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    token = credentials.credentials
+    roadmap_id = request.roadmap_id  
+
+    try:
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="El token no contiene un correo válido")
+        user = db.query(User).filter_by(correo=email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        roadmap = db.query(Roadmap).filter_by(
+            id_roadmap=roadmap_id, id_usuario_creador=user.id_usuario
+        ).first()
+
+        if not roadmap:
+            raise HTTPException(status_code=404, detail="Roadmap no encontrado")
+        db.delete(roadmap)
+        db.commit()
+
+        return {"message": "Roadmap eliminado correctamente"}
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")
