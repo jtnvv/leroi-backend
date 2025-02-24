@@ -4,4 +4,4 @@ def price_roadmap(tokens):
     :param tokens: Cantidad de tokens consumidos.
     :return: Cantidad de creditos que costará realizar el roadmap.
     """
-    return round(tokens*0.001) + 1
+    return (int(tokens*0.0001) + 1)
