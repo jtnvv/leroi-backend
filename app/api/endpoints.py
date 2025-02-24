@@ -898,9 +898,9 @@ async def preview_cost_process_file(
     """
     # Calcular costo de creditos
     full_prompt = (
-        f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
-        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
-        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
+         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
+         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
     )
 
     tokens = count_tokens_gemini(full_prompt)
@@ -911,6 +911,8 @@ async def preview_cost_process_file(
             "user_credits": 0,
             "credits_cost": 0
         })
+        #     raise HTTPException(
+        #         status_code=406, detail="Se superó la cantidad máxima de tokens")
         return response
 
     credits_cost = price_roadmap(tokens)
