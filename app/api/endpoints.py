@@ -1,7 +1,7 @@
 import jwt
 import os
 import base64
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Request
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Request,Body
 from fastapi_mail import MessageSchema
 from app.core.email import fastmail
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from app.db.models import (
     TopicRequest, 
     Roadmap,
     RoadmapImageRequest,
+    DeleteRoadmapImageRequest,
     Payment
 )
 from app.services.login import create_access_token, decode_access_token, verify_password
@@ -193,7 +194,8 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
         apellido=request.last_name if request.last_name else '',
         correo=request.email,
         contraseña=hashed_password,
-        proveedor=request.provider
+        proveedor=request.provider,
+        creditos=1000
     )
 
     # Añade el usuario a la base de datos
@@ -204,7 +206,6 @@ async def register_user(request: UserRegistrationRequest, db: Session = Depends(
     return {"status": "success", "message": "Usuario registrado correctamente"}
 
 # LOGIN
-
 
 @router.post("/login-google")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
@@ -218,7 +219,8 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
             apellido='',
             correo=request.email,
             contraseña=None,
-            proveedor="google"
+            proveedor="google",
+            creditos=1000
         )
         db.add(user)
         db.commit()
@@ -476,9 +478,9 @@ async def create_payment(amount: str, credentials: HTTPAuthorizationCredentials 
                 "email": "john@doe.com",
             },
             "back_urls": {
-                "success": "localhost:5173"
-                # "failure": "localhost:5173/order-failed",
-                # "pending": "localhost:5173/pending"
+                "success": FRONTEND_URL,
+                "failure": FRONTEND_URL,
+                "pending": FRONTEND_URL,
             },
             "external_reference": {
                 "id_usuario": id_usuario,
@@ -1004,6 +1006,7 @@ async def generate_roadmap(request: TopicRequest):
         f"cada uno con su propia lista de subtemas adicionales. "
         f"Por ejemplo: '{{\"Subtema 1\": [\"Sub-subtema 1.1\", \"Sub-subtema 1.2\"], \"Subtema 2\": [\"Sub-subtema 2.1\", \"Sub-subtema 2.2\"]}}' con las comillas tal cual como te las di. "
         f"No me des información extra, solo quiero el diccionario anidado con los subtemas y sus sub-subtemas en orden de relevancia. MÁXIMO 6 SubtemaS, MÁXIMO 3 Sub-subtemas y MÍNIMO 1 Sub-subtema ."
+        f"De lo que se genere , la longitud de cada subtema y sub-subtema debe ser MÁXIMO 55 caracteres."
     )
     response, tokens = ask_gemini(full_prompt)
     print("DIOOOO", response)
@@ -1062,6 +1065,40 @@ async def save_roadmap_image(
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
+    
+@router.delete("/delete-roadmap-image")
+async def delete_roadmap_image(
+    request: DeleteRoadmapImageRequest = Body(...),  
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    token = credentials.credentials
+    roadmap_id = request.roadmap_id  
+
+    try:
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="El token no contiene un correo válido")
+        user = db.query(User).filter_by(correo=email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        roadmap = db.query(Roadmap).filter_by(
+            id_roadmap=roadmap_id, id_usuario_creador=user.id_usuario
+        ).first()
+
+        if not roadmap:
+            raise HTTPException(status_code=404, detail="Roadmap no encontrado")
+        db.delete(roadmap)
+        db.commit()
+
+        return {"message": "Roadmap eliminado correctamente"}
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
 
 
 @router.post("/related-topics")
@@ -1073,6 +1110,7 @@ async def related_topics(request: TopicRequest):
     full_prompt = (
         f"Eres un experto en la generación de temas relacionados a un tema principal. El tema principal es {request.topic}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente MÁXIMO 6 temas relacionados y NADA MÁS, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+        f"Y que ademas, Cada tema debe tener una longitud máxima de 45 caracteres.  "
     )
     response, tokens = ask_gemini(full_prompt)
     parse_resposne = response.replace("json", "").replace("```", "")
