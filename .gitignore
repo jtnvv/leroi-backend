@@ -26,7 +26,7 @@ dist-ssr
 
 # Ignorar archivos de caché de Python
 __pycache__/
-*.py[cod]
+*.pyc
 
 
 #Ignorar variables de entorno y archivos de entorno
