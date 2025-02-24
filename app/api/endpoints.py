@@ -906,8 +906,12 @@ async def preview_cost_process_file(
     tokens = count_tokens_gemini(full_prompt)
 
     if tokens >= 1000000:
-        raise HTTPException(
-            status_code=406, detail="Se superó la cantidad máxima de tokens")
+        response = json.dumps({
+            "file_tokens": tokens,
+            "user_credits": 0,
+            "credits_cost": 0
+        })
+        return response
 
     credits_cost = price_roadmap(tokens)
 
@@ -930,6 +934,7 @@ async def preview_cost_process_file(
     user_credits = user.creditos
 
     response = json.dumps({
+        "file_tokens": tokens,
         "user_credits": user_credits,
         "credits_cost": credits_cost
     })
