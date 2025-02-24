@@ -896,19 +896,20 @@ async def preview_cost_process_file(
     Obtener un costo estimado de cuanto cuesta procesar cierto archivo
     """
     # Calcular costo de creditos
-    full_prompt = (
-        f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
-        f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
-        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
-    )
+    # full_prompt = (
+    #     f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
+    #     f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
+    #     f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    # )
 
-    tokens = count_tokens_gemini(full_prompt)
+    # tokens = count_tokens_gemini(full_prompt)
 
-    if tokens >= 1000000:
-        raise HTTPException(
-            status_code=406, detail="Se superó la cantidad máxima de tokens")
+    # if tokens >= 1000000:
+    #     raise HTTPException(
+    #         status_code=406, detail="Se superó la cantidad máxima de tokens")
 
-    credits_cost = price_roadmap(tokens)
+    # credits_cost = price_roadmap(tokens)
+    credits_cost = 0
 
     # Decodificar el token para obtener el correo del usuario autenticado
     auth_token = credentials.credentials
