@@ -900,20 +900,25 @@ async def preview_cost_process_file(
     Obtener un costo estimado de cuanto cuesta procesar cierto archivo
     """
     # Calcular costo de creditos
-    # full_prompt = (
-    #     f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
-    #     f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
-    #     f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
-    # )
+    full_prompt = (
+         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
+         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
+         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+    )
 
-    # tokens = count_tokens_gemini(full_prompt)
+    tokens = count_tokens_gemini(full_prompt)
 
-    # if tokens >= 1000000:
-    #     raise HTTPException(
-    #         status_code=406, detail="Se superó la cantidad máxima de tokens")
+    if tokens >= 1000000:
+        response = json.dumps({
+            "file_tokens": tokens,
+            "user_credits": 0,
+            "credits_cost": 0
+        })
+        #     raise HTTPException(
+        #         status_code=406, detail="Se superó la cantidad máxima de tokens")
+        return response
 
-    # credits_cost = price_roadmap(tokens)
-    credits_cost = 0
+    credits_cost = price_roadmap(tokens)
 
     # Decodificar el token para obtener el correo del usuario autenticado
     auth_token = credentials.credentials
@@ -934,6 +939,7 @@ async def preview_cost_process_file(
     user_credits = user.creditos
 
     response = json.dumps({
+        "file_tokens": tokens,
         "user_credits": user_credits,
         "credits_cost": credits_cost
     })
@@ -953,14 +959,19 @@ async def process_file(
     Procesar un archivo y obtener las roadmaps
     """
     # print("Se van a generar los 3 temas")
+
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
-        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] Si dentro del documento hay estas palabras: DROGAS, BOMBAS, TRATA DE PERSONAS, PORNOGRAFÍA "
-        f"SOLO devuelve BLOQUEADO, sino responde con los temas principales como te lo pedí. "
+        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] Si dentro del documento hay un tema PELIGROSOS como alguno de estos: DROGAS, BOMBAS, TRATA DE PERSONAS "
+        f"SOLO devuelve BLOQUEADO SINO responde con los temas principales como te lo pedí. "
     )
-
     themes, tokens = ask_gemini(full_prompt)
+    themes = themes.strip()
+    if(themes in ["BLOQUEADO"]):
+        print("ESTE ARCHIVO ES MALICIOSO")
+        raise HTTPException(status_code=401, detail="No puedes generar rutas de temas sensibles")
+    print(themes, type(themes))
 
     themes = themes.strip() 
     themes = json.loads(themes)
@@ -1015,10 +1026,8 @@ async def generate_roadmap(request: TopicRequest):
         f"De lo que se genere , la longitud de cada subtema y sub-subtema debe ser MÁXIMO 55 caracteres."
     )
     response, tokens = ask_gemini(full_prompt)
-    print("DIOOOO", response)
+    print(response)
     parse_resposne = response.replace("json", "").replace("```", "")
-    # print("parseado:", parse_resposne)
-    # print("Tokens usados para este prompt:", tokens)
     return parse_resposne
 
 
@@ -1122,4 +1131,3 @@ async def related_topics(request: TopicRequest):
     parse_resposne = response.replace("json", "").replace("```", "")
     print("parseado:", parse_resposne)
     return parse_resposne
-
