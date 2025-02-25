@@ -963,12 +963,16 @@ async def process_file(
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
-        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] Si dentro del documento encuentras algún tema PELIGROSO o INAPROPIADO SOLO devuelve BLOQUEADO"
     )
-
     themes, tokens = ask_gemini(full_prompt)
-
     themes = themes.strip()
+    if(themes in ["BLOQUEADO"]):
+        print("ESTE ARCHIVO ES MALICIOSO")
+        raise HTTPException(status_code=401, detail="No puedes generar rutas de temas sensibles")
+    print(themes, type(themes))
+
+    themes = themes.strip() 
     themes = json.loads(themes)
     cost = price_roadmap(int(tokens))
 
@@ -1021,10 +1025,8 @@ async def generate_roadmap(request: TopicRequest):
         f"De lo que se genere , la longitud de cada subtema y sub-subtema debe ser MÁXIMO 55 caracteres."
     )
     response, tokens = ask_gemini(full_prompt)
-    print("DIOOOO", response)
+    print(response)
     parse_resposne = response.replace("json", "").replace("```", "")
-    # print("parseado:", parse_resposne)
-    # print("Tokens usados para este prompt:", tokens)
     return parse_resposne
 
 
