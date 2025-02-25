@@ -99,6 +99,11 @@ class Roadmap(Base):
     prompt = Column(String, nullable=False)  # Respuesta de Gemini
     image_base64 = Column(String, nullable=True)  # Imagen en Base64
 
+    
+class DeleteRoadmapImageRequest(BaseModel):
+    roadmap_id: int
+
+
 class RoadmapImageRequest(BaseModel):
     topic: str  # Nombre del roadmap
     roadmap_data: str  # Respuesta de Gemini
