@@ -6,8 +6,8 @@ def calculate_price(amount: int):
     :return: Precio en dolares.
     """
     if 1 <= amount <= 250:
-        return round(amount*0.005)
-    elif 250 <= amount <= 750:
-        return round(amount*0.00495)
-    elif 750 <= amount <= 1500:
-        return round(amount*0.0049)
+        return 1.0
+    elif 250 < amount <= 750:
+        return 2.75
+    elif 750 < amount <= 1500:
+        return 5.0
