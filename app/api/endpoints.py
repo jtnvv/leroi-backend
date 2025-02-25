@@ -1131,4 +1131,3 @@ async def related_topics(request: TopicRequest):
     parse_resposne = response.replace("json", "").replace("```", "")
     print("parseado:", parse_resposne)
     return parse_resposne
-
