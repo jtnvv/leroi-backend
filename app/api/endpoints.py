@@ -959,6 +959,8 @@ async def process_file(
     Procesar un archivo y obtener las roadmaps
     """
     # print("Se van a generar los 3 temas")
+
+    print(request.fileBase64)
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
@@ -967,7 +969,8 @@ async def process_file(
 
     themes, tokens = ask_gemini(full_prompt)
 
-    themes = json.loads(themes.replace("\n", ""))
+    themes = themes.strip()
+    themes = json.loads(themes)
     cost = price_roadmap(int(tokens))
 
     # Decodificar el token para obtener el correo del usuario autenticado
