@@ -956,12 +956,14 @@ async def process_file(
     full_prompt = (
         f"Eres un experto en la extracción de los 3 temas principales de los cuales se pueden generar una ruta de "
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
-        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] "
+        f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] Si dentro del documento hay estas palabras: DROGAS, BOMBAS, TRATA DE PERSONAS, PORNOGRAFÍA "
+        f"SOLO devuelve BLOQUEADO, sino responde con los temas principales como te lo pedí. "
     )
 
     themes, tokens = ask_gemini(full_prompt)
 
-    themes = json.loads(themes.replace("\n", ""))
+    themes = themes.strip() 
+    themes = json.loads(themes)
     cost = price_roadmap(int(tokens))
 
     # Decodificar el token para obtener el correo del usuario autenticado
