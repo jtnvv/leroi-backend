@@ -954,11 +954,11 @@ async def process_file(
         f"aprendizaje de un archivo. El archivo tiene el siguiente nombre {request.fileName} y este es el contenido: {request.fileBase64}. Quiero que el formato de la respuesta sea una"
         f"lista con únicamente los 3 temas principales y nada más, es decir: [\"tema1\", \"tema2\", \"tema3\"] Si dentro del documento encuentras algún tema PELIGROSO o INAPROPIADO devuelve BLOQUEADO"
     )
-
     themes, tokens = ask_gemini(full_prompt)
     print(themes, tokens)
 
-    themes = json.loads(themes.replace("\n", ""))
+    themes = themes.strip() 
+    themes = json.loads(themes)
     cost = price_roadmap(int(tokens))
 
     # Decodificar el token para obtener el correo del usuario autenticado
