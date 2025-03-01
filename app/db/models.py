@@ -4,6 +4,7 @@ from .session import Base
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, timezone
+from typing import Dict
 
 
 class EmailCheckRequest(BaseModel):
