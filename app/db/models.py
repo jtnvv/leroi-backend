@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, func
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey,Boolean, func
 
 from .session import Base
 from pydantic import BaseModel, EmailStr
@@ -35,6 +35,7 @@ class User(Base):
     creditos = Column(Integer, nullable=False, default=0)
     proveedor = Column(String, nullable=True, default='local')
     creditos = Column(Integer, nullable=False, default=0)
+    TFA_enabled = Column(Boolean, nullable=False, default=0)
 
 
 class VerificationCode(Base):
@@ -125,3 +126,5 @@ class Payment(Base):
                           default=datetime.now(timezone.utc))
     id_usuario = Column(ForeignKey("usuario.id_usuario"))
 
+class UserUpdate2FA(BaseModel):
+    is_2fa_enabled: bool

@@ -146,13 +146,20 @@ async def verify_code_endpoint(request: EmailVerificationRequest, db: Session = 
         db (Session): Sesión de la base de datos.
 
     Returns:
-        dict: Estado y mensaje de éxito si el código es correcto.
+        dict: Estado, mensaje de éxito y token de acceso si el código es correcto.
 
     Raises:
         HTTPException: Si el código es incorrecto o ha expirado.
     """
     if verify_code(db, request.email, request.code):
-        return {"status": "success", "message": "Código de verificación correcto"}
+        # Generar el token de acceso
+        access_token = create_access_token(data={"sub": request.email})
+        return {
+            "status": "success",
+            "message": "Código de verificación correcto",
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
     else:
         raise HTTPException(
             status_code=400,
@@ -245,7 +252,12 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     if user.proveedor == "google":
         raise HTTPException(
             status_code=401, detail="Ya has iniciado sesión con Google")
-
+    if user.TFA_enabled :
+        return {
+            "status": "2fa_required",
+            "message": "Se requiere autenticación de doble factor",
+            "email": user.correo
+        }
     blocked_user = db.query(CorreosBloqueados).filter_by(
         correos_login=request.email).first()
 
@@ -725,6 +737,7 @@ async def get_user_profile(
                 "credits": user.creditos,
                 "roadmapsCreated": roadmaps_count, 
                 "provider": user.proveedor,
+                "TFA_enabled":user.TFA_enabled,
             },
         }
 
@@ -732,6 +745,59 @@ async def get_user_profile(
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
+
+@router.put("/update-2fa")
+async def update_2fa_status(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+    is_2fa_enabled: bool = Body(..., embed=True),  # Recibe el nuevo estado de 2FA
+):
+    """
+    Actualiza el estado de la autenticación de doble factor (2FA) para el usuario autenticado.
+
+    Args:
+        credentials (HTTPAuthorizationCredentials): Credenciales de autorización.
+        db (Session): Sesión de la base de datos.
+        is_2fa_enabled (bool): Nuevo estado de 2FA (True o False).
+
+    Returns:
+        dict: Respuesta con el estado de la operación.
+    """
+    token = credentials.credentials
+
+    try:
+        # Decodificar el token para obtener el correo del usuario
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Token inválido")
+
+        # Buscar al usuario por correo
+        user = db.query(User).filter_by(correo=email).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Actualizar el estado de 2FA
+        user.TFA_enabled = is_2fa_enabled
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Estado de 2FA actualizado correctamente",
+            "data": {
+                "TFA_enabled": user.TFA_enabled,
+            },
+        }
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al actualizar el estado de 2FA: {str(e)}")
 
 @router.get("/user-roadmaps")
 async def get_user_roadmaps(
