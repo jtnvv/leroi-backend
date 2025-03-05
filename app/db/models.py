@@ -51,6 +51,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: Optional[str] = None
     name: Optional[str] = None
+    recaptcha_token: Optional[str] = None
 
 
 class ForgotPasswordRequest(BaseModel):

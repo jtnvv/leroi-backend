@@ -37,6 +37,7 @@ import asyncio
 from typing import Dict
 from datetime import datetime, timedelta, timezone
 import json
+import requests
 
 router = APIRouter()
 security = HTTPBearer()
@@ -219,6 +220,7 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     """
     Inicia sesión de un usuario existente.
     """
+    verify_recaptcha(request.recaptcha_token)
     user = db.query(User).filter_by(correo=request.email).first()
     if not user:
         user = User(
@@ -234,17 +236,28 @@ async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
         db.refresh(user)
 
     access_token = create_access_token(data={"sub": user.correo})
-
+    print("captcha", request.recaptcha_token)
     return {"status": "success", "access_token": access_token, "token_type": "bearer"}
 
 # Login normal
 
 MAX_ATTEMPTS = 5
 BLOCK_TIME = timedelta(minutes=15)
+RECAPTCHA_SECRET_KEY = "6Ldl3OkqAAAAAIxc-zCEinbhJP62Qh3z838vI6Jn"
 
-
+def verify_recaptcha(captcha_response):
+        """Verifica el CAPTCHA con Google reCAPTCHA"""
+        secret_key = RECAPTCHA_SECRET_KEY
+        url = "https://www.google.com/recaptcha/api/siteverify"
+        data = {"secret": secret_key, "response": captcha_response}
+        response = requests.post(url, data=data)
+        result = response.json()
+        print(f"🔹 Respuesta de Google reCAPTCHA: {result}")
+        return result.get("success", False)
+    
 @router.post("/login")
 async def login_user(request: LoginRequest, db: Session = Depends(get_db)):
+    verify_recaptcha(request.recaptcha_token)
     user = db.query(User).filter_by(correo=request.email).first()
 
     if not user:
